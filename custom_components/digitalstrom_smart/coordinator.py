@@ -134,6 +134,14 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         # overschrijft een scene-wissel de ingang-sensor. (René, SW-KL, 21 aug 2026.)
         self._device_on_states: dict[str, bool] = {}  # dsuid -> output on/off (switch)
         self._device_input_states: dict[str, bool] = {}  # dsuid -> binary input active (sensor)
+        # Joker-actoren waarvoor de runtime-divergentie (isOn=true maar getOutputValue=0)
+        # AL met WARNING gemeld is. Een blijvende divergentie herstelt elke poll opnieuw —
+        # correct, maar zonder deze rem zou elke 30s-cyclus een nieuwe WARNING geven en
+        # HA een terugkerende 'fout uit aangepaste integratie'-banner tonen (René, SW-KL,
+        # 23 aug 2026). We waarschuwen daarom één keer per episode; zolang de divergentie
+        # aanhoudt zakt het naar debug. Zodra de actor weer klopt (out>0 of geen isOn),
+        # verwijderen we de dsuid zodat een NIEUWE episode later weer één WARNING geeft.
+        self._joker_divergence_warned: set[str] = set()
         # Per-device runtime output status from apartment/getDevices: {dsuid: {"on", "is_present", "is_valid"}}
         self._device_runtime: dict[str, dict] = {}
 
@@ -421,6 +429,10 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     # een mislezing (-1) of een echte >0 laat isOn ongemoeid. De seed/startup-tak
                     # (old_on is None) blijft onveranderd.
                     resolved = is_on
+                    if not confirm_startup and old_on is not None and not is_on:
+                        # getState meldt weer 'false': divergentie-episode voorbij,
+                        # WARNING her-bewapenen voor een eventuele volgende episode.
+                        self._joker_divergence_warned.discard(dsuid)
                     if not confirm_startup and old_on is not None and is_on:
                         run_out_val = -1
                         try:
@@ -431,12 +443,26 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                             )
                         if run_out_val == 0:
                             resolved = False
-                            _LOGGER.warning(
-                                "[DS-DEBUG] Joker-actor %s (%s) DIVERGENTIE: getState.isOn=true "
-                                "maar getOutputValue=0 (relais fysiek UIT) -> gecorrigeerd naar UIT",
-                                dsuid, dev.get("name", ""),
-                            )
+                            # Edge-triggered: één WARNING per divergentie-episode. Een
+                            # blijvende isOn-leugen corrigeren we elke poll (goed), maar
+                            # her-loggen op WARNING zou HA's error-banner laten terugkeren.
+                            # Zolang de episode duurt → debug; nieuwe episode → weer WARNING.
+                            if dsuid not in self._joker_divergence_warned:
+                                self._joker_divergence_warned.add(dsuid)
+                                _LOGGER.warning(
+                                    "[DS-DEBUG] Joker-actor %s (%s) DIVERGENTIE: getState.isOn=true "
+                                    "maar getOutputValue=0 (relais fysiek UIT) -> gecorrigeerd naar UIT",
+                                    dsuid, dev.get("name", ""),
+                                )
+                            else:
+                                _LOGGER.debug(
+                                    "[DS-DEBUG] Joker-actor %s (%s) DIVERGENTIE houdt aan "
+                                    "(isOn=true, outputValue=0) -> blijft gecorrigeerd naar UIT",
+                                    dsuid, dev.get("name", ""),
+                                )
                         else:
+                            # Actor klopt weer (out>0): episode voorbij, WARNING her-bewapenen.
+                            self._joker_divergence_warned.discard(dsuid)
                             _LOGGER.debug(
                                 "[DS-DEBUG] Joker-actor %s runtime: getState=%s outputValue=%s (akkoord)",
                                 dsuid, is_on, run_out_val,
