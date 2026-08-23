@@ -409,7 +409,40 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     if confirm_startup and old_on is None and not is_on:
                         pending_confirm.append((zone_id, dsuid, dev))
                         continue
-                    self._device_on_states[dsuid] = is_on
+
+                    # RUNTIME relais-bevestiging (René, 23 aug 2026, beta18). René bewees dat
+                    # getState.isOn tijdens BEDRIJF spontaan naar 'true' springt terwijl de
+                    # SW-KL fysiek UIT is — ook de rauwe getState in de browser gaf isOn:true.
+                    # isOn is dus geen betrouwbare runtime-bron voor deze unit. De directe
+                    # relais-output (getOutputValue, 0..255) IS de fysieke stand; die vertrouwen
+                    # we al in de settle-tak (out_val>0 redt een valse boot-'false'). Symmetrisch:
+                    # claimt isOn 'true' maar geeft getOutputValue exact 0, dan staat het relais
+                    # fysiek UIT en corrigeren we naar False. Alleen een expliciete 0 corrigeert;
+                    # een mislezing (-1) of een echte >0 laat isOn ongemoeid. De seed/startup-tak
+                    # (old_on is None) blijft onveranderd.
+                    resolved = is_on
+                    if not confirm_startup and old_on is not None and is_on:
+                        run_out_val = -1
+                        try:
+                            run_out_val = await self.api.get_device_output_value(dsuid)
+                        except Exception as err:
+                            _LOGGER.debug(
+                                "Joker-actor runtime getOutputValue faalde %s: %s", dsuid, err
+                            )
+                        if run_out_val == 0:
+                            resolved = False
+                            _LOGGER.warning(
+                                "[DS-DEBUG] Joker-actor %s (%s) DIVERGENTIE: getState.isOn=true "
+                                "maar getOutputValue=0 (relais fysiek UIT) -> gecorrigeerd naar UIT",
+                                dsuid, dev.get("name", ""),
+                            )
+                        else:
+                            _LOGGER.debug(
+                                "[DS-DEBUG] Joker-actor %s runtime: getState=%s outputValue=%s (akkoord)",
+                                dsuid, is_on, run_out_val,
+                            )
+
+                    self._device_on_states[dsuid] = resolved
                     if old_on is None:
                         # Diagnostiek (René, 22 aug 2026, beta16). René meldde een actor die
                         # fysiek UIT staat maar getState.isOn=true geeft (ook in de browser) —
@@ -431,13 +464,13 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                             "outputValue=%s (seed=getState)",
                             dsuid, is_on, seed_out_val,
                         )
-                    elif old_on != is_on:
+                    elif old_on != resolved:
                         # Externe wijziging die geen callScene-event opleverde (of gemist
                         # tijdens een event-loop reconnect): de 30s live getState-refresh
                         # vangt 'm alsnog op.
                         _LOGGER.info(
                             "Joker-actor output CHANGED (extern, live getState): %s (%s) on=%s (was %s)",
-                            dsuid[:12], dev.get("name", ""), is_on, old_on,
+                            dsuid[:12], dev.get("name", ""), resolved, old_on,
                         )
                 except Exception as err:
                     _LOGGER.debug("Joker-actor live state fetch faalde %s: %s", dsuid, err)
