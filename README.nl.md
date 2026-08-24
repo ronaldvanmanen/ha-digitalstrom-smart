@@ -244,6 +244,12 @@ Home Assistant gebruikt automatisch de juiste taal op basis van je systeemtaal. 
 
 ## Wijzigingslog
 
+### v4.2.0 (24-08-2026) — Betrouwbare Joker-actor-status (SW-KL) & schakelbare gebruikersstatussen
+
+- **Joker-actoren die óók een ingang hebben (bijv. SW-KL / KL200) tonen nu de juiste aan/uit-status.** Voorheen deelden de relais-uitgang en de binaire ingang één status-slot, waardoor de status vlak na het opstarten fout kon zijn of na een dSS-herstart kon omklappen. Uitgang en ingang zitten nu in aparte status-slots, de uitgangsstand wordt bij (her)start bevestigd via `getOutputValue`, en een verouderde apparaat-cache overschrijft de live uitgang niet meer. Een runtime-controle corrigeert een valse "aan" alléén als de relais-uitgang echt nul is — geen blinde gok. In het veld bevestigd over meerdere dagen en herstarts.
+- **Gebruikersgedefinieerde (custom) statussen zijn als schakelaar te bedienen.** Schrijfbare custom-statussen verschijnen als schakelaar en worden correct naar de dSS geschreven (op de status-naam, met de `addon`-parameter); alleen-lezen statussen worden niet meer als schakelaar getoond, en een echte dSS-schrijffout wordt zichtbaar gemaakt in plaats van stil te falen.
+- **Schonere logging** — uitgebreide `[DS-DEBUG]`-diagnostiek naar debug-niveau, en de Joker-divergentie-waarschuwing is edge-getriggerd (één keer per episode) in plaats van de log te overspoelen.
+
 ### v4.1.4 (25-06-2026) — Regelwaarde-sensor (koel-/verwarmvraag uit de DS)
 
 - **Nieuwe sensor "Regelwaarde" per klimaatzone**: toont de aansturing van de DS-temperatuurregeling als waarde mét teken — **negatief = koelvraag, positief = verwarmvraag** (grootte = intensiteit). Werkt ook in koelmodus, waar een setpoint ontbreekt. De waarde wordt nu ook uit de per-zone temperatuurregeling-status gelezen (niet alleen de apartement-uitlezing), en de sensor wordt altijd aangemaakt voor zones met temperatuurregeling.

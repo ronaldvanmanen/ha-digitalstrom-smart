@@ -244,6 +244,12 @@ Home Assistant automatically uses the correct language based on your system lang
 
 ## Changelog
 
+### v4.2.0 (2026-08-24) — Reliable Joker actuator status (SW-KL) & user-defined state switches
+
+- **Joker actuators that also have an input (e.g. SW-KL / KL200) now report the correct on/off status.** Previously the relay output and the binary input shared a single state slot, so the status could be wrong right after startup or flip after a dSS restart. Output and input are now tracked in separate state slots, the output state is confirmed at (re)start via `getOutputValue`, and a stale device cache no longer overwrites the live output. A runtime gate only corrects a false "on" when the relay output is actually zero — no blind guessing. Verified in the field over several days and restarts.
+- **User-defined (custom) states can be controlled as switches.** Writable custom states are exposed as switches and written correctly to the dSS (by state name, using the `addon` parameter); read-only states are no longer shown as switches, and a real dSS write error is surfaced instead of failing silently.
+- **Cleaner logs** — verbose `[DS-DEBUG]` diagnostics moved to debug level, and the Joker divergence warning is edge-triggered (once per episode) instead of flooding the log.
+
 ### v4.1.4 (2026-06-25) — Control value sensor (cooling/heating demand from DS)
 
 - **New "Control value" sensor per climate zone**: exposes the DS temperature-control output as a signed value — **negative = cooling demand, positive = heating demand** (magnitude = intensity). Works in cooling mode too, where a setpoint is absent. The value is now also read from the per-zone temperature-control status (not only the apartment poll), and the sensor is always created for zones with temperature control.
