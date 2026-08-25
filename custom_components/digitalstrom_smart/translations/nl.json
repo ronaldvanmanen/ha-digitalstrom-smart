@@ -51,11 +51,15 @@
         "data": {
           "enabled_zones": "Ingeschakelde zones",
           "invert_cover_position": "Raambekleding richting omdraaien",
-          "pro_license_key": "Pro licentiesleutel"
+          "pro_license_key": "Pro licentiesleutel",
+          "main_poll_interval": "Poll-interval (seconden)",
+          "binary_poll_interval": "Vangnet-poll contact/beweging (seconden)"
         },
         "data_description": {
           "invert_cover_position": "Schakel dit in als je zonwering/rolluiken de verkeerde kant op bewegen (open/dicht omgedraaid)",
-          "pro_license_key": "Ontgrendel klimaatregeling, energiedashboard, buitensensoren, apparaat-identificatie en meer. Haal je sleutel op wooniot.nl/pro"
+          "pro_license_key": "Ontgrendel klimaatregeling, energiedashboard, buitensensoren, apparaat-identificatie en meer. Haal je sleutel op wooniot.nl/pro",
+          "main_poll_interval": "Hoe vaak sensor-, energie- en statusdata van de dSS wordt gelezen. Hoger = minder belasting op de dSS-server. Standaard 30s (bereik 15–300).",
+          "binary_poll_interval": "Vangnet-poll voor contact-/bewegings-/deursensoren. Deze werken al realtime bij via events; deze poll is alleen een vangnet voor gemiste events. Hoger = minder belasting. Standaard 30s (bereik 15–300)."
         }
       }
     }

@@ -51,11 +51,15 @@
         "data": {
           "enabled_zones": "Enabled zones",
           "invert_cover_position": "Invert cover direction",
-          "pro_license_key": "Pro license key"
+          "pro_license_key": "Pro license key",
+          "main_poll_interval": "Poll interval (seconds)",
+          "binary_poll_interval": "Contact/motion fallback poll interval (seconds)"
         },
         "data_description": {
           "invert_cover_position": "Enable this if your blinds/screens move in the wrong direction (open/close reversed)",
-          "pro_license_key": "Unlock climate control, energy dashboard, outdoor sensors, device identification and more. Get your key at wooniot.nl/pro"
+          "pro_license_key": "Unlock climate control, energy dashboard, outdoor sensors, device identification and more. Get your key at wooniot.nl/pro",
+          "main_poll_interval": "How often sensor, energy and status data is read from the dSS. Higher = less load on the dSS server. Default 30s (range 15–300).",
+          "binary_poll_interval": "Fallback reconcile poll for contacts/motion/door sensors. These already update in real time via events; this poll is only a safety net for missed events. Higher = less load. Default 30s (range 15–300)."
         }
       }
     }

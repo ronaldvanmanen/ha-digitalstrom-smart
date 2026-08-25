@@ -442,7 +442,20 @@ CLIMATE_HOLIDAY = 5
 POLL_INTERVAL = 30               # 30s for all sensor data
 POLL_INTERVAL_ENERGY = 30        # kept for backwards compat
 POLL_INTERVAL_TEMPERATURE = 300  # 5 min for temp control values
-POLL_INTERVAL_BINARY = 5         # 5s for binary input states (contacts, doors)
+# Binary-input fallback poll. Motion/contact/door changes already arrive in
+# real time via the stateChange event long-poll (_process_event); this loop is
+# only a reconciliation vangnet for events missed during a reconnect. It runs a
+# FULL apartment/getDevices each cycle, so it is the dominant steady-state dSS
+# request stream — one every 5s was ~17k calls/day and slowed the dSS on larger
+# installs (René, 25 aug 2026). Default relaxed to 30s (matches the main cycle);
+# events keep the fast path instant. User-tunable via the integration options.
+POLL_INTERVAL_BINARY = 30        # fallback reconcile for binary inputs
+
+# Bounds for the user-configurable poll intervals (Options flow).
+MIN_POLL_INTERVAL = 15
+MAX_POLL_INTERVAL = 300
+DEFAULT_MAIN_POLL_INTERVAL = POLL_INTERVAL_ENERGY   # 30s
+DEFAULT_BINARY_POLL_INTERVAL = POLL_INTERVAL_BINARY  # 30s
 
 # --- Event listener ---
 EVENT_POLL_TIMEOUT = 60  # Long-poll timeout for event/get
@@ -464,6 +477,8 @@ CONF_DSS_ID = "dss_id"
 # Options
 CONF_INVERT_COVER = "invert_cover_position"
 CONF_PRO_LICENSE = "pro_license_key"
+CONF_MAIN_POLL_INTERVAL = "main_poll_interval"
+CONF_BINARY_POLL_INTERVAL = "binary_poll_interval"
 
 # --- Platforms ---
 # Free platforms (always loaded)

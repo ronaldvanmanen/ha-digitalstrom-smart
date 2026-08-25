@@ -18,6 +18,12 @@ from .const import (
     CONF_DSS_ID,
     CONF_INVERT_COVER,
     CONF_PRO_LICENSE,
+    CONF_MAIN_POLL_INTERVAL,
+    CONF_BINARY_POLL_INTERVAL,
+    DEFAULT_MAIN_POLL_INTERVAL,
+    DEFAULT_BINARY_POLL_INTERVAL,
+    MIN_POLL_INTERVAL,
+    MAX_POLL_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -297,6 +303,17 @@ class DigitalStromOptionsFlow(config_entries.OptionsFlow):
         current_enabled = [str(z) for z in entry.data.get(CONF_ENABLED_ZONES, [])]
         current_invert = entry.options.get(CONF_INVERT_COVER, False)
         current_pro = entry.options.get(CONF_PRO_LICENSE, "")
+        current_main = entry.options.get(
+            CONF_MAIN_POLL_INTERVAL, DEFAULT_MAIN_POLL_INTERVAL
+        )
+        current_binary = entry.options.get(
+            CONF_BINARY_POLL_INTERVAL, DEFAULT_BINARY_POLL_INTERVAL
+        )
+
+        interval_selector = vol.All(
+            vol.Coerce(int),
+            vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL),
+        )
 
         schema = vol.Schema(
             {
@@ -308,6 +325,14 @@ class DigitalStromOptionsFlow(config_entries.OptionsFlow):
                     CONF_PRO_LICENSE,
                     default=current_pro,
                 ): str,
+                vol.Optional(
+                    CONF_MAIN_POLL_INTERVAL,
+                    default=current_main,
+                ): interval_selector,
+                vol.Optional(
+                    CONF_BINARY_POLL_INTERVAL,
+                    default=current_binary,
+                ): interval_selector,
             }
         )
 

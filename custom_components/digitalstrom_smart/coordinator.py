@@ -95,14 +95,19 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
     def __init__(
         self, hass: HomeAssistant, api: DigitalStromApi,
         structure: dict, dss_id: str = "",
+        main_poll_interval: int = POLL_INTERVAL_ENERGY,
+        binary_poll_interval: int = POLL_INTERVAL_BINARY,
     ) -> None:
         super().__init__(
             hass, _LOGGER, name=DOMAIN,
-            update_interval=timedelta(seconds=POLL_INTERVAL_ENERGY),
+            update_interval=timedelta(seconds=main_poll_interval),
         )
         self.api = api
         self._structure = structure
         self.dss_id = dss_id
+        # User-tunable dSS request rate (Options flow). The binary fallback poll
+        # is the dominant steady-state load; events keep the fast path instant.
+        self._binary_poll_interval = binary_poll_interval
         self._event_task: asyncio.Task | None = None
         self._binary_poll_task: asyncio.Task | None = None
         self._reconnect_delay = RECONNECT_INITIAL
@@ -1668,22 +1673,25 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         Contacts, door sensors, and window sensors need faster polling
         than the main 30s update cycle for responsive state tracking.
         """
-        _LOGGER.info("Binary poll loop STARTED (interval=%ds)", POLL_INTERVAL_BINARY)
+        interval = self._binary_poll_interval
+        _LOGGER.info("Binary poll loop STARTED (interval=%ds)", interval)
         poll_count = 0
+        # Log-cadans schaalt mee met het interval: ~elke 5 min een levensteken.
+        log_every = max(1, 300 // interval)
         while True:
             try:
-                await asyncio.sleep(POLL_INTERVAL_BINARY)
+                await asyncio.sleep(interval)
                 await self.poll_binary_input_states()
                 self.async_update_listeners()
                 poll_count += 1
-                if poll_count % 60 == 0:  # Log every 5 minutes
+                if poll_count % log_every == 0:
                     _LOGGER.info("Binary poll loop alive: %d polls completed", poll_count)
             except asyncio.CancelledError:
                 _LOGGER.info("Binary poll loop STOPPED")
                 return
             except Exception as err:
                 _LOGGER.warning("Binary poll loop error: %s", err)
-                await asyncio.sleep(POLL_INTERVAL_BINARY)
+                await asyncio.sleep(interval)
 
     async def _event_loop(self) -> None:
         """Continuously long-poll for events."""
