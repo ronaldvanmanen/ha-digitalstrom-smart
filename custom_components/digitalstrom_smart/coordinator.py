@@ -607,7 +607,7 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     bi_state, is_active, old_state,
                 )
 
-    async def fetch_climate_data(self) -> None:
+    async def fetch_climate_data(self, skip_temp_prefetch: bool = False) -> None:
         """Fetch climate control status and config for zones. PRO.
 
         Tries all zones — not just those with GROUP_HEATING/GROUP_TEMP_CONTROL,
@@ -615,22 +615,28 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         control configured at the zone level without heating-group devices.
         Also pre-fetches temperature values so the fallback in has_temp_control
         works at startup even when ControlMode is 0 (cooling mode).
+
+        skip_temp_prefetch: when True, skip the getTemperatureControlValues
+        pre-fetch because the caller already fetched it this cycle (the main
+        poll _async_update_data does so before calling us). Removes a duplicate
+        apartment-wide dSS call per poll cycle (René, 25 aug 2026).
         """
         if not self.pro_enabled:
             return
 
         # Pre-fetch temperature values — needed as fallback when in cooling mode
         # (getTemperatureControlConfig2 may return ControlMode=0 while cooling is active)
-        try:
-            temp_data = await self.api.get_temperature_values()
-            for zone_data in temp_data:
-                zone_id = zone_data.get("id")
-                if zone_id is not None and zone_id > 0:
-                    existing = self._temperatures.get(zone_id, {})
-                    existing.update(zone_data)
-                    self._temperatures[zone_id] = existing
-        except Exception as err:
-            _LOGGER.debug("Pre-fetch temperature values failed: %s", err)
+        if not skip_temp_prefetch:
+            try:
+                temp_data = await self.api.get_temperature_values()
+                for zone_data in temp_data:
+                    zone_id = zone_data.get("id")
+                    if zone_id is not None and zone_id > 0:
+                        existing = self._temperatures.get(zone_id, {})
+                        existing.update(zone_data)
+                        self._temperatures[zone_id] = existing
+            except Exception as err:
+                _LOGGER.debug("Pre-fetch temperature values failed: %s", err)
 
         for zone_id, zone_info in self.zones.items():
             # Always try to fetch config for zones not yet cached
@@ -702,10 +708,14 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.debug("Could not fetch heating_system_mode: %s", err)
 
-    async def fetch_sensor_data(self) -> None:
-        """Fetch apartment-wide sensor values (outdoor, per-zone). PRO."""
+    async def fetch_sensor_data(self) -> dict | None:
+        """Fetch apartment-wide sensor values (outdoor, per-zone). PRO.
+
+        Returns the raw getSensorValues response so the caller can hand it to
+        fetch_outdoor_weather and avoid a second identical apartment-wide call
+        in the same poll cycle (René, 25 aug 2026)."""
         if not self.pro_enabled:
-            return
+            return None
         try:
             data = await self.api.get_sensor_values()
             self._outdoor_sensors = data.get("outdoor", {})
@@ -713,8 +723,9 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 zid = zone_data.get("id")
                 if zid:
                     self._zone_sensors[zid] = zone_data
+            return data
         except DigitalStromApiError:
-            pass
+            return None
 
     async def fetch_circuit_data(self) -> None:
         """Fetch dSM circuit/meter information, per-circuit power and energy.
@@ -1527,10 +1538,15 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         self._malfunction_names = malf
         self._service_names = serv
 
-    async def fetch_outdoor_weather(self) -> None:
-        """Weather-service outdoor temperature + sun position (PRO). One call."""
+    async def fetch_outdoor_weather(self, data: dict | None = None) -> None:
+        """Weather-service outdoor temperature + sun position (PRO). One call.
+
+        data: an already-fetched getSensorValues response to reuse instead of
+        making a fresh call. The main poll passes the result of
+        fetch_sensor_data() here so getSensorValues runs only once per cycle
+        (René, 25 aug 2026). Standalone callers pass nothing and we fetch."""
         try:
-            res = await self.api.get_sensor_values()
+            res = data if data is not None else await self.api.get_sensor_values()
             outdoor = res.get("outdoor", {}) if isinstance(res, dict) else {}
             for k in ("temperature", "sunazimuth", "sunelevation"):
                 node = outdoor.get(k)
@@ -2002,11 +2018,14 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 except Exception as err:  # never break the poll cycle
                     _LOGGER.debug("Custom states retry fetch failed: %s", err)
 
-            # Pro features: extra data
+            # Pro features: extra data. getTemperatureControlValues is already
+            # fetched above (skip_temp_prefetch), and getSensorValues is fetched
+            # once here and reused for the outdoor/sun read — no duplicate
+            # apartment-wide dSS calls per cycle (René, 25 aug 2026).
             if self.pro_enabled:
-                await self.fetch_sensor_data()
-                await self.fetch_climate_data()
-                await self.fetch_outdoor_weather()  # weather-service temp + sun position
+                sensor_data = await self.fetch_sensor_data()
+                await self.fetch_climate_data(skip_temp_prefetch=True)
+                await self.fetch_outdoor_weather(data=sensor_data)
 
         except DigitalStromAuthError:
             _LOGGER.warning("Auth error during poll, reconnecting...")
