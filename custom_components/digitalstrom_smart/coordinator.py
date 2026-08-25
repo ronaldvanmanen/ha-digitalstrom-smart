@@ -759,37 +759,73 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     len(self._circuits),
                     ", ".join(f"{c.get('name','')} [{c.get('hwName','')}]" for c in self._circuits) or "(geen)",
                 )
-            # Fetch per-circuit power + cumulative energy
+            # Fetch power + cumulative energy voor ALLE meters in 2 calls i.p.v.
+            # 2 per circuit. metering/getLatest met from=.meters(all) geeft één
+            # value-entry per meter terug, elk getagd met zijn eigen dSUID én dsid.
+            # Geverifieerd tegen een echte dSS-respons: het dSUID-veld in de entry
+            # is exact gelijk aan circuit["dSUID"] (bv. ...0000003c900), dus we
+            # koppelen 1-op-1 zonder te gokken. type=energy (Wh) blijft een aparte
+            # call — power en energie kunnen niet in één respons.
+            def _index_by_id(values: list[dict] | None) -> dict[str, dict]:
+                idx: dict[str, dict] = {}
+                for v in values or []:
+                    for key in (v.get("dSUID"), v.get("dsid")):
+                        if key:
+                            idx[key] = v
+                return idx
+
+            p_all = e_all = None
+            try:
+                p_all = await self.api.get_metering_latest(meter_dsuid=".meters(all)")
+            except DigitalStromApiError:
+                pass
+            try:
+                # Genormaliseerde metering-API (Wh) — getEnergyMeterValue gaf een raw
+                # waarde met model-afhankelijke eenheid. metering type=energy = consistent.
+                e_all = await self.api.get_metering_latest(
+                    meter_dsuid=".meters(all)", meter_type="energy"
+                )
+            except DigitalStromApiError:
+                pass
+            p_idx = _index_by_id(p_all)
+            e_idx = _index_by_id(e_all)
+
             for circuit in self._circuits:
                 dsuid = circuit.get("dSUID", "")
                 hw = circuit.get("hwName", "")
                 if not dsuid:
                     continue
-                p_raw = e_raw = None
-                try:
-                    p_raw = await self.api.get_metering_latest(
-                        meter_dsuid=f".meters({dsuid})"
-                    )
-                    for v in p_raw:
-                        self._circuit_power[dsuid] = int(v.get("value", 0))
-                except DigitalStromApiError:
-                    pass
-                try:
-                    # Genormaliseerde metering-API (Wh) — getEnergyMeterValue gaf een raw
-                    # waarde met model-afhankelijke eenheid. metering type=energy = consistent.
-                    e_raw = await self.api.get_metering_latest(
-                        meter_dsuid=f".meters({dsuid})", meter_type="energy"
-                    )
-                    for ev in e_raw:
-                        wh = ev.get("value")
-                        if wh and wh > 0:
-                            self._circuit_energy_wh[dsuid] = int(wh)
-                except DigitalStromApiError:
-                    pass
-                # Diagnose-hulp: ruwe metering-respons per dSM (DEBUG).
+                pv = p_idx.get(dsuid)
+                ev = e_idx.get(dsuid)
+                # Vangnet: zit een meter niet in de bulk-respons, haal hem gericht
+                # per-dSM op. Zo verliezen we nooit stilletjes een Energie-sensor —
+                # in het normale geval blijft het bij 2 calls per cyclus.
+                if pv is None:
+                    try:
+                        r = await self.api.get_metering_latest(
+                            meter_dsuid=f".meters({dsuid})"
+                        )
+                        pv = r[0] if r else None
+                    except DigitalStromApiError:
+                        pv = None
+                if ev is None:
+                    try:
+                        r = await self.api.get_metering_latest(
+                            meter_dsuid=f".meters({dsuid})", meter_type="energy"
+                        )
+                        ev = r[0] if r else None
+                    except DigitalStromApiError:
+                        ev = None
+                if pv is not None:
+                    self._circuit_power[dsuid] = int(pv.get("value", 0))
+                if ev is not None:
+                    wh = ev.get("value")
+                    if wh and wh > 0:
+                        self._circuit_energy_wh[dsuid] = int(wh)
+                # Diagnose-hulp: gekoppelde metering-entry per dSM (DEBUG).
                 _LOGGER.debug(
-                    "dSM-meter %s [%s] dsuid=%s → power_raw=%s | energy_raw=%s",
-                    circuit.get("name", ""), hw, dsuid, p_raw, e_raw,
+                    "dSM-meter %s [%s] dsuid=%s → power=%s | energy=%s",
+                    circuit.get("name", ""), hw, dsuid, pv, ev,
                 )
         except DigitalStromApiError as err:
             _LOGGER.debug("Circuit data fetch failed: %s", err)
