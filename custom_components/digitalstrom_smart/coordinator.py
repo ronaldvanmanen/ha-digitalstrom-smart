@@ -1151,12 +1151,22 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         1. apartment getTemperatureControlValues (NominalValue)
         2. per-zone getTemperatureControlStatus (NominalValue)
         """
+        # Guard the comparison: right after a dSS restart NominalValue can be
+        # present but explicitly None (dict.get only substitutes the default when
+        # the key is absent). None > 0 would raise TypeError, which — raised from
+        # a climate entity's async_write_ha_state inside async_update_listeners —
+        # aborts the whole listener loop and leaves every entity registered after
+        # it (all power/energy sensors) unavailable. Fall through to None instead.
         data = self._temperatures.get(zone_id)
-        if data and data.get("NominalValue", 0) > 0:
-            return data["NominalValue"]
+        if data:
+            nv = data.get("NominalValue")
+            if isinstance(nv, (int, float)) and not isinstance(nv, bool) and nv > 0:
+                return nv
         status = self._climate_status.get(zone_id)
-        if status and status.get("NominalValue", 0) > 0:
-            return status["NominalValue"]
+        if status:
+            nv = status.get("NominalValue")
+            if isinstance(nv, (int, float)) and not isinstance(nv, bool) and nv > 0:
+                return nv
         return None
 
     def _zone_device_temperature(self, zone_id: int) -> float | None:
