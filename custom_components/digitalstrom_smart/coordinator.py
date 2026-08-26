@@ -140,6 +140,11 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         self._temperatures: dict[int, dict] = {}  # zone_id -> temp data
         self._outdoor_sensors: dict = {}  # outdoor weather data
         self._zone_sensors: dict[int, dict] = {}  # zone_id -> sensor readings
+        # True only while THIS poll cycle's apartment getSensorValues succeeded.
+        # Reset at the start of every _async_update_data; lets fetch_device_sensors
+        # map the fresh apartment cache exactly once, and fall back to the per-zone
+        # vangnet loop if the apartment fetch structurally fails (René, 26 aug 2026).
+        self._zone_sensors_fresh: bool = False
 
         # Device sensor values: {dsuid: {sensor_type: value}}
         self._device_sensor_values: dict[str, dict[int, float]] = {}
@@ -751,11 +756,10 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 zid = zone_data.get("id")
                 if zid:
                     self._zone_sensors[zid] = zone_data
-            # Derive per-device zone sensors (temp/humidity/CO2/brightness) from
-            # this same apartment response, so PRO installs don't also run the
-            # per-zone get_zone_sensor_values loop in fetch_device_sensors
-            # (René, 26 aug 2026).
-            self.map_zone_sensors_to_devices()
+            # Mark this cycle's apartment cache as fresh. The actual per-device
+            # mapping is done once, by fetch_device_sensors() which runs right
+            # after this in the poll cycle — no double mapping (René, 26 aug 2026).
+            self._zone_sensors_fresh = True
             return data
         except DigitalStromApiError:
             return None
@@ -1057,14 +1061,19 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         After startup, real-time updates come via deviceSensorValue events
         (sensorValueFloat, also pre-scaled).
 
-        PRO: reuse the apartment-wide getSensorValues already cached in
-        self._zone_sensors (populated by fetch_sensor_data the same cycle) —
-        no per-zone get_zone_sensor_values calls. Falls back to the free
-        per-zone loop only when that cache isn't populated yet (cold start,
-        before the first apartment fetch). FREE: the per-zone loop is the only
-        option (get_zone_sensor_values is license-free; get_sensor_values is
-        PRO-only), so it always runs for free installs (René, 26 aug 2026)."""
-        if self.pro_enabled and self._zone_sensors:
+        PRO: reuse the apartment-wide getSensorValues that fetch_sensor_data()
+        fetched EARLIER THIS SAME cycle (self._zone_sensors) and map it once —
+        no per-zone get_zone_sensor_values calls. The freshness flag guards
+        against two things René flagged (26 aug 2026): (1) it maps only the
+        current cycle's data, so PRO no longer maps last cycle's stale cache
+        here and then remaps fresh in fetch_sensor_data — one mapping per cycle;
+        (2) if the apartment fetch structurally failed this cycle (network
+        hiccup, licence expiring mid-run) the flag stays False, so we fall back
+        to the per-zone vangnet loop instead of silently reusing an ageing
+        cache. FREE: the per-zone loop is the only option (get_zone_sensor_values
+        is license-free; get_sensor_values is PRO-only), so it always runs for
+        free installs."""
+        if self.pro_enabled and self._zone_sensors_fresh:
             self.map_zone_sensors_to_devices()
             return
 
@@ -2122,6 +2131,10 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict:
         """Periodic poll for consumption + temperature + sensors."""
         try:
+            # New cycle: no fresh apartment sensor cache yet.
+            self._zone_sensors_fresh = False
+            sensor_data = None
+
             self._consumption = await self.api.get_consumption()
 
             temp_data = await self.api.get_temperature_values()
@@ -2136,7 +2149,15 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
             # Per-circuit power (FREE)
             await self.fetch_circuit_data()
 
-            # Device sensors: Ulux, thermostats, etc. (FREE)
+            # PRO: fetch the apartment-wide getSensorValues BEFORE mapping device
+            # sensors, so fetch_device_sensors maps THIS cycle's fresh data exactly
+            # once (and can fall back to the per-zone vangnet if this fetch failed).
+            # The response is reused below for the outdoor/sun read — still one
+            # apartment-wide call per cycle (René, 26 aug 2026).
+            if self.pro_enabled:
+                sensor_data = await self.fetch_sensor_data()
+
+            # Device sensors: Ulux, thermostats, etc. (FREE per-zone loop / PRO map)
             await self.fetch_device_sensors()
 
             # Binary input states: handled by separate fast poll loop (_binary_poll_loop)
@@ -2173,11 +2194,11 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("Custom states retry fetch failed: %s", err)
 
             # Pro features: extra data. getTemperatureControlValues is already
-            # fetched above (skip_temp_prefetch), and getSensorValues is fetched
-            # once here and reused for the outdoor/sun read — no duplicate
-            # apartment-wide dSS calls per cycle (René, 25 aug 2026).
+            # fetched above (skip_temp_prefetch), and getSensorValues was fetched
+            # once earlier this cycle (sensor_data) and is reused for the
+            # outdoor/sun read — no duplicate apartment-wide dSS calls per cycle
+            # (René, 25 + 26 aug 2026).
             if self.pro_enabled:
-                sensor_data = await self.fetch_sensor_data()
                 # De per-zone climate-status-poll (getTemperatureControlStatus per
                 # zone, ~N calls) is ook alleen vangnet — stateChange-events houden
                 # de setpoints/mode tussendoor live. Draai 'm op dezelfde ~1×/min
