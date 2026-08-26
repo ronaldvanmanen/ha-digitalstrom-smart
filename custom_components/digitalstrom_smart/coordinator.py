@@ -751,6 +751,11 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 zid = zone_data.get("id")
                 if zid:
                     self._zone_sensors[zid] = zone_data
+            # Derive per-device zone sensors (temp/humidity/CO2/brightness) from
+            # this same apartment response, so PRO installs don't also run the
+            # per-zone get_zone_sensor_values loop in fetch_device_sensors
+            # (René, 26 aug 2026).
+            self.map_zone_sensors_to_devices()
             return data
         except DigitalStromApiError:
             return None
@@ -984,19 +989,84 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
             len(self._user_states), len(raw),
         )
 
+    # Zone-level sensor keys (pre-scaled by the dSS) → HA sensor type.
+    _ZONE_SENSOR_KEY_MAP = {
+        "TemperatureValue": SENSOR_TEMPERATURE,
+        "HumidityValue": SENSOR_HUMIDITY,
+        "CO2concentrationValue": SENSOR_CO2,
+        "BrightnessValue": SENSOR_BRIGHTNESS,
+    }
+
+    @staticmethod
+    def _zone_sensor_entries(zone_data: dict) -> list[dict]:
+        """Named-key sensor entries for one zone, tolerant of both dSS shapes.
+
+        Both /json/zone/getSensorValues and the per-zone blocks of
+        /json/apartment/getSensorValues expose their readings as a "values"
+        list of {SensorNameValue: x} dicts. If a caller hands us a flat dict
+        (a zone block without a "values" list), we wrap it so the exact same
+        extraction works either way — no assumption about which shape it is."""
+        if not isinstance(zone_data, dict):
+            return []
+        values = zone_data.get("values")
+        if isinstance(values, list):
+            return values
+        return [zone_data]
+
+    def _map_zone_sensor_data(self, zone_id: int, zone_info: dict, zone_data: dict) -> int:
+        """Map one zone's pre-scaled readings onto the zone's devices.
+
+        Returns the number of values applied."""
+        found = 0
+        for entry in self._zone_sensor_entries(zone_data):
+            if not isinstance(entry, dict):
+                continue
+            for key, stype in self._ZONE_SENSOR_KEY_MAP.items():
+                if key not in entry:
+                    continue
+                try:
+                    val = round(float(entry[key]), 2)
+                except (TypeError, ValueError):
+                    continue
+                # First device in this zone that has this sensor type.
+                dsuid = self._find_device_with_sensor(zone_info, stype)
+                if dsuid:
+                    self._device_sensor_values.setdefault(dsuid, {})[stype] = val
+                    found += 1
+        return found
+
+    def map_zone_sensors_to_devices(self) -> None:
+        """PRO: derive per-device temp/humidity/CO2/brightness from the
+        apartment getSensorValues already fetched this cycle (self._zone_sensors).
+
+        This is the exact same data the FREE per-zone loop would gather, so for
+        PRO installs it lets us skip the extra get_zone_sensor_values call per
+        zone every cycle — that apartment-wide call runs anyway for the outdoor/
+        climate read (René, 26 aug 2026)."""
+        found_count = 0
+        for zone_id, zone_info in self.zones.items():
+            zone_data = self._zone_sensors.get(zone_id)
+            if zone_data:
+                found_count += self._map_zone_sensor_data(zone_id, zone_info, zone_data)
+        _LOGGER.debug("Mapped %d device sensor values from apartment cache", found_count)
+
     async def fetch_device_sensors(self) -> None:
-        """Fetch initial device sensor values via zone/getSensorValues.
+        """Fetch device sensor values (Ulux, thermostats, etc.), zone-level.
 
         The dSS pre-scales all values — no manual bus-encoding needed.
         After startup, real-time updates come via deviceSensorValue events
         (sensorValueFloat, also pre-scaled).
-        """
-        _ZONE_KEY_MAP = {
-            "TemperatureValue": SENSOR_TEMPERATURE,
-            "HumidityValue": SENSOR_HUMIDITY,
-            "CO2concentrationValue": SENSOR_CO2,
-            "BrightnessValue": SENSOR_BRIGHTNESS,
-        }
+
+        PRO: reuse the apartment-wide getSensorValues already cached in
+        self._zone_sensors (populated by fetch_sensor_data the same cycle) —
+        no per-zone get_zone_sensor_values calls. Falls back to the free
+        per-zone loop only when that cache isn't populated yet (cold start,
+        before the first apartment fetch). FREE: the per-zone loop is the only
+        option (get_zone_sensor_values is license-free; get_sensor_values is
+        PRO-only), so it always runs for free installs (René, 26 aug 2026)."""
+        if self.pro_enabled and self._zone_sensors:
+            self.map_zone_sensors_to_devices()
+            return
 
         found_count = 0
         for zone_id, zone_info in self.zones.items():
@@ -1004,17 +1074,7 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 data = await self.api.get_zone_sensor_values(zone_id)
             except (DigitalStromApiError, DigitalStromAuthError):
                 continue
-
-            for entry in data.get("values", []):
-                for key, stype in _ZONE_KEY_MAP.items():
-                    if key not in entry:
-                        continue
-                    val = round(float(entry[key]), 2)
-                    # Find first device in this zone with matching sensor type
-                    dsuid = self._find_device_with_sensor(zone_info, stype)
-                    if dsuid:
-                        self._device_sensor_values.setdefault(dsuid, {})[stype] = val
-                        found_count += 1
+            found_count += self._map_zone_sensor_data(zone_id, zone_info, data)
 
         _LOGGER.debug("Polled %d sensor values from zone API", found_count)
         # Power/energy polling runs in _power_poll_loop (background task) — not here.
