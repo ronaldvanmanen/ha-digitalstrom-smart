@@ -307,116 +307,50 @@
       "light_area1_off": {
         "name": "Light Area 1 Off"
       },
-      "light_area1_scene_1": {
-        "name": "Light Area 1 Scene 1"
-      },
-      "light_area1_scene_2": {
-        "name": "Light Area 1 Scene 2"
-      },
-      "light_area1_scene_3": {
-        "name": "Light Area 1 Scene 3"
+      "light_area1_on": {
+        "name": "Light Area 1 On"
       },
       "shade_area1_off": {
         "name": "Shade Area 1 Off"
       },
-      "shade_area1_scene_1": {
-        "name": "Shade Area 1 Scene 1"
-      },
-      "shade_area1_scene_2": {
-        "name": "Shade Area 1 Scene 2"
-      },
-      "shade_area1_scene_3": {
-        "name": "Shade Area 1 Scene 3"
+      "shade_area1_on": {
+        "name": "Shade Area 1 On"
       },
       "light_area2_off": {
         "name": "Light Area 2 Off"
       },
-      "light_area2_scene_1": {
-        "name": "Light Area 2 Scene 1"
-      },
-      "light_area2_scene_2": {
-        "name": "Light Area 2 Scene 2"
-      },
-      "light_area2_scene_3": {
-        "name": "Light Area 2 Scene 3"
-      },
-      "light_area2_scene_4": {
-        "name": "Light Area 2 Scene 4"
+      "light_area2_on": {
+        "name": "Light Area 2 On"
       },
       "shade_area2_off": {
         "name": "Shade Area 2 Off"
       },
-      "shade_area2_scene_1": {
-        "name": "Shade Area 2 Scene 1"
-      },
-      "shade_area2_scene_2": {
-        "name": "Shade Area 2 Scene 2"
-      },
-      "shade_area2_scene_3": {
-        "name": "Shade Area 2 Scene 3"
-      },
-      "shade_area2_scene_4": {
-        "name": "Shade Area 2 Scene 4"
+      "shade_area2_on": {
+        "name": "Shade Area 2 On"
       },
       "light_area3_off": {
         "name": "Light Area 3 Off"
       },
-      "light_area3_scene_1": {
-        "name": "Light Area 3 Scene 1"
-      },
-      "light_area3_scene_2": {
-        "name": "Light Area 3 Scene 2"
-      },
-      "light_area3_scene_3": {
-        "name": "Light Area 3 Scene 3"
-      },
-      "light_area3_scene_4": {
-        "name": "Light Area 3 Scene 4"
+      "light_area3_on": {
+        "name": "Light Area 3 On"
       },
       "shade_area3_off": {
         "name": "Shade Area 3 Off"
       },
-      "shade_area3_scene_1": {
-        "name": "Shade Area 3 Scene 1"
-      },
-      "shade_area3_scene_2": {
-        "name": "Shade Area 3 Scene 2"
-      },
-      "shade_area3_scene_3": {
-        "name": "Shade Area 3 Scene 3"
-      },
-      "shade_area3_scene_4": {
-        "name": "Shade Area 3 Scene 4"
+      "shade_area3_on": {
+        "name": "Shade Area 3 On"
       },
       "light_area4_off": {
         "name": "Light Area 4 Off"
       },
-      "light_area4_scene_1": {
-        "name": "Light Area 4 Scene 1"
-      },
-      "light_area4_scene_2": {
-        "name": "Light Area 4 Scene 2"
-      },
-      "light_area4_scene_3": {
-        "name": "Light Area 4 Scene 3"
-      },
-      "light_area4_scene_4": {
-        "name": "Light Area 4 Scene 4"
+      "light_area4_on": {
+        "name": "Light Area 4 On"
       },
       "shade_area4_off": {
         "name": "Shade Area 4 Off"
       },
-      "shade_area4_scene_1": {
-        "name": "Shade Area 4 Scene 1"
-      },
-      "shade_area4_scene_2": {
-        "name": "Shade Area 4 Scene 2"
-      },
-      "shade_area4_scene_3": {
-        "name": "Shade Area 4 Scene 3"
-      },
-      "shade_area4_scene_4": {
-        "name": "Shade Area 4 Scene 4"
+      "shade_area4_on": {
+        "name": "Shade Area 4 On"
       }
     }
   },

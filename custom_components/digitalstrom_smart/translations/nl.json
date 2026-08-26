@@ -307,116 +307,50 @@
       "light_area1_off": {
         "name": "Verlichting Zone 1 Uit"
       },
-      "light_area1_scene_1": {
-        "name": "Verlichting Zone 1 Scene 1"
-      },
-      "light_area1_scene_2": {
-        "name": "Verlichting Zone 1 Scene 2"
-      },
-      "light_area1_scene_3": {
-        "name": "Verlichting Zone 1 Scene 3"
+      "light_area1_on": {
+        "name": "Verlichting Zone 1 Aan"
       },
       "shade_area1_off": {
         "name": "Zonwering Zone 1 Uit"
       },
-      "shade_area1_scene_1": {
-        "name": "Zonwering Zone 1 Scene 1"
-      },
-      "shade_area1_scene_2": {
-        "name": "Zonwering Zone 1 Scene 2"
-      },
-      "shade_area1_scene_3": {
-        "name": "Zonwering Zone 1 Scene 3"
+      "shade_area1_on": {
+        "name": "Zonwering Zone 1 Aan"
       },
       "light_area2_off": {
         "name": "Verlichting Zone 2 Uit"
       },
-      "light_area2_scene_1": {
-        "name": "Verlichting Zone 2 Scene 1"
-      },
-      "light_area2_scene_2": {
-        "name": "Verlichting Zone 2 Scene 2"
-      },
-      "light_area2_scene_3": {
-        "name": "Verlichting Zone 2 Scene 3"
-      },
-      "light_area2_scene_4": {
-        "name": "Verlichting Zone 2 Scene 4"
+      "light_area2_on": {
+        "name": "Verlichting Zone 2 Aan"
       },
       "shade_area2_off": {
         "name": "Zonwering Zone 2 Uit"
       },
-      "shade_area2_scene_1": {
-        "name": "Zonwering Zone 2 Scene 1"
-      },
-      "shade_area2_scene_2": {
-        "name": "Zonwering Zone 2 Scene 2"
-      },
-      "shade_area2_scene_3": {
-        "name": "Zonwering Zone 2 Scene 3"
-      },
-      "shade_area2_scene_4": {
-        "name": "Zonwering Zone 2 Scene 4"
+      "shade_area2_on": {
+        "name": "Zonwering Zone 2 Aan"
       },
       "light_area3_off": {
         "name": "Verlichting Zone 3 Uit"
       },
-      "light_area3_scene_1": {
-        "name": "Verlichting Zone 3 Scene 1"
-      },
-      "light_area3_scene_2": {
-        "name": "Verlichting Zone 3 Scene 2"
-      },
-      "light_area3_scene_3": {
-        "name": "Verlichting Zone 3 Scene 3"
-      },
-      "light_area3_scene_4": {
-        "name": "Verlichting Zone 3 Scene 4"
+      "light_area3_on": {
+        "name": "Verlichting Zone 3 Aan"
       },
       "shade_area3_off": {
         "name": "Zonwering Zone 3 Uit"
       },
-      "shade_area3_scene_1": {
-        "name": "Zonwering Zone 3 Scene 1"
-      },
-      "shade_area3_scene_2": {
-        "name": "Zonwering Zone 3 Scene 2"
-      },
-      "shade_area3_scene_3": {
-        "name": "Zonwering Zone 3 Scene 3"
-      },
-      "shade_area3_scene_4": {
-        "name": "Zonwering Zone 3 Scene 4"
+      "shade_area3_on": {
+        "name": "Zonwering Zone 3 Aan"
       },
       "light_area4_off": {
         "name": "Verlichting Zone 4 Uit"
       },
-      "light_area4_scene_1": {
-        "name": "Verlichting Zone 4 Scene 1"
-      },
-      "light_area4_scene_2": {
-        "name": "Verlichting Zone 4 Scene 2"
-      },
-      "light_area4_scene_3": {
-        "name": "Verlichting Zone 4 Scene 3"
-      },
-      "light_area4_scene_4": {
-        "name": "Verlichting Zone 4 Scene 4"
+      "light_area4_on": {
+        "name": "Verlichting Zone 4 Aan"
       },
       "shade_area4_off": {
         "name": "Zonwering Zone 4 Uit"
       },
-      "shade_area4_scene_1": {
-        "name": "Zonwering Zone 4 Scene 1"
-      },
-      "shade_area4_scene_2": {
-        "name": "Zonwering Zone 4 Scene 2"
-      },
-      "shade_area4_scene_3": {
-        "name": "Zonwering Zone 4 Scene 3"
-      },
-      "shade_area4_scene_4": {
-        "name": "Zonwering Zone 4 Scene 4"
+      "shade_area4_on": {
+        "name": "Zonwering Zone 4 Aan"
       }
     }
   },

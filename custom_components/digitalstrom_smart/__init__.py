@@ -316,9 +316,10 @@ def _register_services(hass: HomeAssistant) -> None:
         zone_id = call.data["zone_id"]
         group = call.data.get("group", 1)
         scene = call.data["scene_number"]
+        force = call.data.get("force", False)
         for entry_data in hass.data[DOMAIN].values():
             try:
-                await entry_data["api"].call_scene(zone_id, group, scene)
+                await entry_data["api"].call_scene(zone_id, group, scene, force=force)
             except DigitalStromApiError as err:
                 _LOGGER.error("call_scene failed: %s", err)
 

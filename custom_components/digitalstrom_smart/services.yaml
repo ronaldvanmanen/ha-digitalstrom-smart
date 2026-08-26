@@ -29,6 +29,16 @@ call_scene:
           min: 0
           max: 127
           mode: box
+    force:
+      name: Force (local priority override)
+      description: >-
+        Override local priority. A device switched on by its physical wall
+        button ignores plain zone scene calls; enable this to force the scene
+        through (e.g. to reliably switch a zone off from an automation).
+        Default false keeps standard behaviour.
+      default: false
+      selector:
+        boolean:
 
 blink_device:
   name: Blink Device

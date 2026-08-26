@@ -196,54 +196,46 @@ SCENE_COVER_SUN_PROTECT = 11  # Sun protection position
 SCENE_COVER_WIND_PROTECT = 71  # Wind protection (fully open)
 
 # --- dS Area Scene Numbers ---
-# Area 1: scenes 6-9
-SCENE_AREA1_OFF = 6
-SCENE_AREA1_1 = 7
-SCENE_AREA1_2 = 8
-SCENE_AREA1_3 = 9
-
-# Area 2: scenes 10-14
-SCENE_AREA2_OFF = 10
-SCENE_AREA2_1 = 11
-SCENE_AREA2_2 = 12
-SCENE_AREA2_3 = 13
-SCENE_AREA2_4 = 14
-
-# Area 3: scenes 20-24
-SCENE_AREA3_OFF = 20
-SCENE_AREA3_1 = 21
-SCENE_AREA3_2 = 22
-SCENE_AREA3_3 = 23
-SCENE_AREA3_4 = 24
-
-# Area 4: scenes 30-34
-SCENE_AREA4_OFF = 30
-SCENE_AREA4_1 = 31
-SCENE_AREA4_2 = 32
-SCENE_AREA4_3 = 33
-SCENE_AREA4_4 = 34
+# GEVERIFIEERD tegen de officiële dS scene-tabel (openHAB SceneEnum) + velddata
+# (GitHub #26) + melding #35. Elk area heeft precies één OFF- en één ON-scene op
+# zone/groep-niveau:
+#   Area 1: uit = 1, aan = 6 | Area 2: uit = 2, aan = 7
+#   Area 3: uit = 3, aan = 8 | Area 4: uit = 4, aan = 9
+# (scene 0 = hele zone uit, 5 = hele zone aan / preset 1.)
+# Er bestaan GEEN "Area x scene 1/2/3/4" — de vorige nummering (6/10/20/30 als
+# area-off) was fout en gaf verkeerde entity_id's (GitHub #35).
+SCENE_AREA1_OFF = 1
+SCENE_AREA1_ON = 6
+SCENE_AREA2_OFF = 2
+SCENE_AREA2_ON = 7
+SCENE_AREA3_OFF = 3
+SCENE_AREA3_ON = 8
+SCENE_AREA4_OFF = 4
+SCENE_AREA4_ON = 9
 
 # --- dS Area aan/uit-scenes voor zone is_on-detectie ---
-# BEVESTIGD met velddata (Urs Frischknecht, GitHub #26, 28 jun 2026):
-# de fysieke schakelaar stuurt per area een ON- en een OFF-scene:
-#   Area 1 aan = 6, uit = 1 | Area 2 aan = 7, uit = 2
-#   Area 3 aan = 8, uit = 3 | Area 4 aan = 9, uit = 4
-# (scene 0 = hele zone uit, 5 = hele zone aan / preset 1.)
-# LET OP: de SCENE_AREA*-constanten hierboven (6/10/20/30) zijn een ANDERE,
-# foutieve nummering en worden alleen voor scene-NAAMGEVING gebruikt — NOOIT
-# voor aan/uit. Gebruik voor is_on uitsluitend onderstaande maps.
+# BEVESTIGD met velddata (Urs Frischknecht, GitHub #26, 28 jun 2026) en de
+# officiële dS scene-tabel: de fysieke schakelaar stuurt per area een ON- en
+# een OFF-scene. Dit is dezelfde nummering als de SCENE_AREA*-constanten
+# hierboven (nu gelijkgetrokken).
 AREA_ON_SCENES = {6: 1, 7: 2, 8: 3, 9: 4}   # scene -> area-index (area aan)
 AREA_OFF_SCENES = {1: 1, 2: 2, 3: 3, 4: 4}  # scene -> area-index (area uit)
+
+# Extended presets (Preset 10-44) — scene-nummers per dS scene-tabel.
+EXTENDED_PRESET_NAMES = {
+    32: "Preset 10", 33: "Preset 11", 20: "Preset 12", 21: "Preset 13", 22: "Preset 14",
+    34: "Preset 20", 35: "Preset 21", 23: "Preset 22", 24: "Preset 23", 25: "Preset 24",
+    36: "Preset 30", 37: "Preset 31", 26: "Preset 32", 27: "Preset 33", 28: "Preset 34",
+    38: "Preset 40", 39: "Preset 41", 29: "Preset 42", 30: "Preset 43", 31: "Preset 44",
+}
 
 # All zone-level scene numbers that can be user-configured
 # Excludes apartment-wide scenes (65+) which are handled separately
 ALL_ZONE_SCENES = [
     SCENE_OFF, SCENE_1, SCENE_2, SCENE_3, SCENE_4,     # Preset 0-4
-    SCENE_AREA1_OFF, SCENE_AREA1_1, SCENE_AREA1_2, SCENE_AREA1_3,  # Area 1
-    SCENE_AREA2_OFF, SCENE_AREA2_1, SCENE_AREA2_2, SCENE_AREA2_3, SCENE_AREA2_4,  # Area 2
-    SCENE_AREA3_OFF, SCENE_AREA3_1, SCENE_AREA3_2, SCENE_AREA3_3, SCENE_AREA3_4,  # Area 3
-    SCENE_AREA4_OFF, SCENE_AREA4_1, SCENE_AREA4_2, SCENE_AREA4_3, SCENE_AREA4_4,  # Area 4
-    40, 41, 42, 43, 44,  # Preset 10-14 (extended presets)
+    SCENE_AREA1_OFF, SCENE_AREA2_OFF, SCENE_AREA3_OFF, SCENE_AREA4_OFF,  # Area 1-4 uit (1-4)
+    SCENE_AREA1_ON, SCENE_AREA2_ON, SCENE_AREA3_ON, SCENE_AREA4_ON,      # Area 1-4 aan (6-9)
+    *EXTENDED_PRESET_NAMES.keys(),  # Preset 10-44
 ]
 
 # Named scene defaults per group
@@ -255,32 +247,19 @@ NAMED_SCENES = {
     SCENE_4: "Scene 4",
 }
 
-# Default names for area scenes (used when dSS has no custom name)
+# Default names for area/extended scenes (used when dSS has no custom name).
+# Area scenes: elk area heeft één OFF (1-4) en één ON (6-9). GEVERIFIEERD
+# tegen de officiële dS scene-tabel + melding #35.
 AREA_SCENE_NAMES = {
     SCENE_AREA1_OFF: "Area 1 Off",
-    SCENE_AREA1_1: "Area 1 Scene 1",
-    SCENE_AREA1_2: "Area 1 Scene 2",
-    SCENE_AREA1_3: "Area 1 Scene 3",
     SCENE_AREA2_OFF: "Area 2 Off",
-    SCENE_AREA2_1: "Area 2 Scene 1",
-    SCENE_AREA2_2: "Area 2 Scene 2",
-    SCENE_AREA2_3: "Area 2 Scene 3",
-    SCENE_AREA2_4: "Area 2 Scene 4",
     SCENE_AREA3_OFF: "Area 3 Off",
-    SCENE_AREA3_1: "Area 3 Scene 1",
-    SCENE_AREA3_2: "Area 3 Scene 2",
-    SCENE_AREA3_3: "Area 3 Scene 3",
-    SCENE_AREA3_4: "Area 3 Scene 4",
     SCENE_AREA4_OFF: "Area 4 Off",
-    SCENE_AREA4_1: "Area 4 Scene 1",
-    SCENE_AREA4_2: "Area 4 Scene 2",
-    SCENE_AREA4_3: "Area 4 Scene 3",
-    SCENE_AREA4_4: "Area 4 Scene 4",
-    40: "Preset 10",
-    41: "Preset 11",
-    42: "Preset 12",
-    43: "Preset 13",
-    44: "Preset 14",
+    SCENE_AREA1_ON: "Area 1 On",
+    SCENE_AREA2_ON: "Area 2 On",
+    SCENE_AREA3_ON: "Area 3 On",
+    SCENE_AREA4_ON: "Area 4 On",
+    **EXTENDED_PRESET_NAMES,
 }
 
 NAMED_SCENES_SHADE = {
@@ -320,48 +299,27 @@ SCENE_TRANSLATION_KEYS = {
     (GROUP_HEATING, SCENE_2): "heating_economy",
     (GROUP_HEATING, SCENE_3): "heating_night",
     (GROUP_HEATING, SCENE_4): "heating_holiday",
-    # Area 1
+    # Area scenes — elk area heeft één OFF (1-4) en één ON (6-9).
+    # Area 1 (uit=1, aan=6)
     (GROUP_LIGHT, SCENE_AREA1_OFF): "light_area1_off",
-    (GROUP_LIGHT, SCENE_AREA1_1): "light_area1_scene_1",
-    (GROUP_LIGHT, SCENE_AREA1_2): "light_area1_scene_2",
-    (GROUP_LIGHT, SCENE_AREA1_3): "light_area1_scene_3",
+    (GROUP_LIGHT, SCENE_AREA1_ON): "light_area1_on",
     (GROUP_SHADE, SCENE_AREA1_OFF): "shade_area1_off",
-    (GROUP_SHADE, SCENE_AREA1_1): "shade_area1_scene_1",
-    (GROUP_SHADE, SCENE_AREA1_2): "shade_area1_scene_2",
-    (GROUP_SHADE, SCENE_AREA1_3): "shade_area1_scene_3",
-    # Area 2
+    (GROUP_SHADE, SCENE_AREA1_ON): "shade_area1_on",
+    # Area 2 (uit=2, aan=7)
     (GROUP_LIGHT, SCENE_AREA2_OFF): "light_area2_off",
-    (GROUP_LIGHT, SCENE_AREA2_1): "light_area2_scene_1",
-    (GROUP_LIGHT, SCENE_AREA2_2): "light_area2_scene_2",
-    (GROUP_LIGHT, SCENE_AREA2_3): "light_area2_scene_3",
-    (GROUP_LIGHT, SCENE_AREA2_4): "light_area2_scene_4",
+    (GROUP_LIGHT, SCENE_AREA2_ON): "light_area2_on",
     (GROUP_SHADE, SCENE_AREA2_OFF): "shade_area2_off",
-    (GROUP_SHADE, SCENE_AREA2_1): "shade_area2_scene_1",
-    (GROUP_SHADE, SCENE_AREA2_2): "shade_area2_scene_2",
-    (GROUP_SHADE, SCENE_AREA2_3): "shade_area2_scene_3",
-    (GROUP_SHADE, SCENE_AREA2_4): "shade_area2_scene_4",
-    # Area 3
+    (GROUP_SHADE, SCENE_AREA2_ON): "shade_area2_on",
+    # Area 3 (uit=3, aan=8)
     (GROUP_LIGHT, SCENE_AREA3_OFF): "light_area3_off",
-    (GROUP_LIGHT, SCENE_AREA3_1): "light_area3_scene_1",
-    (GROUP_LIGHT, SCENE_AREA3_2): "light_area3_scene_2",
-    (GROUP_LIGHT, SCENE_AREA3_3): "light_area3_scene_3",
-    (GROUP_LIGHT, SCENE_AREA3_4): "light_area3_scene_4",
+    (GROUP_LIGHT, SCENE_AREA3_ON): "light_area3_on",
     (GROUP_SHADE, SCENE_AREA3_OFF): "shade_area3_off",
-    (GROUP_SHADE, SCENE_AREA3_1): "shade_area3_scene_1",
-    (GROUP_SHADE, SCENE_AREA3_2): "shade_area3_scene_2",
-    (GROUP_SHADE, SCENE_AREA3_3): "shade_area3_scene_3",
-    (GROUP_SHADE, SCENE_AREA3_4): "shade_area3_scene_4",
-    # Area 4
+    (GROUP_SHADE, SCENE_AREA3_ON): "shade_area3_on",
+    # Area 4 (uit=4, aan=9)
     (GROUP_LIGHT, SCENE_AREA4_OFF): "light_area4_off",
-    (GROUP_LIGHT, SCENE_AREA4_1): "light_area4_scene_1",
-    (GROUP_LIGHT, SCENE_AREA4_2): "light_area4_scene_2",
-    (GROUP_LIGHT, SCENE_AREA4_3): "light_area4_scene_3",
-    (GROUP_LIGHT, SCENE_AREA4_4): "light_area4_scene_4",
+    (GROUP_LIGHT, SCENE_AREA4_ON): "light_area4_on",
     (GROUP_SHADE, SCENE_AREA4_OFF): "shade_area4_off",
-    (GROUP_SHADE, SCENE_AREA4_1): "shade_area4_scene_1",
-    (GROUP_SHADE, SCENE_AREA4_2): "shade_area4_scene_2",
-    (GROUP_SHADE, SCENE_AREA4_3): "shade_area4_scene_3",
-    (GROUP_SHADE, SCENE_AREA4_4): "shade_area4_scene_4",
+    (GROUP_SHADE, SCENE_AREA4_ON): "shade_area4_on",
 }
 
 # Outdoor sensor key -> translation key
