@@ -205,6 +205,14 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         # setpoint zodra het systeem naar koelen schakelt).
         self._temp_control_zones: set[int] = set()
         self._climate_config: dict[int, dict] = {}  # zone_id -> config
+        # Zones met een succesvolle config-call ZONDER actieve klimaatregeling.
+        # Voorkomt dat fetch_climate_data() zulke zones elke vangnet-cyclus
+        # opnieuw bevraagt (getTemperatureControlConfig2) — het antwoord
+        # ('mode': 'off') verandert niet tijdens de levensduur van de
+        # coordinator. Een mislukte call belandt hier NIET in, zodat een
+        # tijdelijke dSS-hapering volgende cyclus gewoon opnieuw wordt
+        # geprobeerd (René, 26 aug 2026).
+        self._climate_config_checked: set[int] = set()
 
         # Apartment-wide state (PRO)
         self._apartment_presence: int | None = None  # current presence scene nr
@@ -672,8 +680,15 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Pre-fetch temperature values failed: %s", err)
 
         for zone_id, zone_info in self.zones.items():
-            # Always try to fetch config for zones not yet cached
-            if zone_id not in self._climate_config:
+            # Fetch config once per zone: zones met bevestigde klimaatregeling
+            # zitten in _climate_config, zones die bevestigd GEEN regeling
+            # hebben in _climate_config_checked. Beide worden overgeslagen, zodat
+            # we niet elke vangnet-cyclus opnieuw getTemperatureControlConfig2
+            # aanroepen voor zones waarvan het antwoord al bekend is.
+            if (
+                zone_id not in self._climate_config
+                and zone_id not in self._climate_config_checked
+            ):
                 try:
                     config = await self.api.get_temperature_control_config(zone_id)
                     _LOGGER.info(
@@ -685,6 +700,13 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     control_mode = config.get("ControlMode", config.get("mode", ""))
                     if _is_climate_control_active(control_mode):
                         self._climate_config[zone_id] = config
+                    else:
+                        # Succesvolle call, maar geen actieve klimaatregeling:
+                        # onthoud dit zodat we deze zone niet elke cyclus opnieuw
+                        # bevragen. Alleen bij een geslaagde call (niet in de
+                        # except-tak), zodat een tijdelijke dSS-fout retrybaar
+                        # blijft.
+                        self._climate_config_checked.add(zone_id)
                 except DigitalStromApiError as err:
                     _LOGGER.debug(
                         "Zone %d (%s) no climate config: %s",
