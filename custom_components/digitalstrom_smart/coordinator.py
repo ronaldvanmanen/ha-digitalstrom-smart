@@ -24,6 +24,7 @@ from .const import (
     signal_button_event,
     POLL_INTERVAL_ENERGY,
     POLL_INTERVAL_BINARY,
+    POLL_INTERVAL_VANGNET,
     RECONNECT_INITIAL,
     RECONNECT_MAX,
     GROUP_LIGHT,
@@ -114,6 +115,17 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         self._event_task: asyncio.Task | None = None
         self._binary_poll_task: asyncio.Task | None = None
         self._reconnect_delay = RECONNECT_INITIAL
+
+        # Vangnet-cadans voor de joker-actor live-confirm + climate-status-poll.
+        # Beide zijn alleen vangnet (events houden ze tussendoor live), dus draaien
+        # ze op ~1×/min i.p.v. elke hoofdcyclus. De drempel is het vangnet-interval
+        # minus een halve hoofdcyclus, zodat het op de default 30s-poll robuust op
+        # elke twééde cyclus valt (i.p.v. door scheduler-drift naar 90s te springen).
+        # Nooit trager dan de hoofdcyclus zelf (als de user die > 60s zet).
+        self._vangnet_interval = max(POLL_INTERVAL_VANGNET, main_poll_interval)
+        self._vangnet_due_threshold = self._vangnet_interval - main_poll_interval / 2
+        self._last_joker_confirm: float = 0.0   # throttle joker-actor live-confirm
+        self._last_climate_poll: float = 0.0    # throttle per-zone climate-status
 
         # State tracking: {(zone_id, group): {"scene": int, "value": int, "is_on": bool}}
         self._zone_states: dict[tuple[int, int], dict[str, Any]] = {}
@@ -2064,10 +2076,15 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
             await self.fetch_apartment_state()
 
             # Joker-ACTOR output-stand LIVE herbevestigen (getState.isOn). callScene-
-            # events houden de switch tussendoor live; deze 30s-refresh is het vangnet
+            # events houden de switch tussendoor live; deze refresh is het vangnet
             # voor gemiste events en vervangt de vroegere (onbetrouwbare) stale-cache-
-            # uitlezing in de 5s binary-poll (René, SW-KL200, 22 aug 2026).
-            await self.fetch_joker_actuator_states()
+            # uitlezing in de 5s binary-poll (René, SW-KL200, 22 aug 2026). Kost tot
+            # ~2×N calls/cyclus (getState + getOutputValue per actor), dus draait als
+            # vangnet op ~1×/min i.p.v. elke hoofdcyclus (René, 26 aug 2026).
+            poll_now = _time.time()
+            if poll_now - self._last_joker_confirm >= self._vangnet_due_threshold:
+                self._last_joker_confirm = poll_now
+                await self.fetch_joker_actuator_states()
 
             # dSS /usr/states backup-poll (events keep these live in between).
             await self.fetch_dss_states()
@@ -2091,7 +2108,16 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
             # apartment-wide dSS calls per cycle (René, 25 aug 2026).
             if self.pro_enabled:
                 sensor_data = await self.fetch_sensor_data()
-                await self.fetch_climate_data(skip_temp_prefetch=True)
+                # De per-zone climate-status-poll (getTemperatureControlStatus per
+                # zone, ~N calls) is ook alleen vangnet — stateChange-events houden
+                # de setpoints/mode tussendoor live. Draai 'm op dezelfde ~1×/min
+                # vangnet-cadans i.p.v. elke hoofdcyclus (René, 26 aug 2026). De
+                # getTemperatureControlValues-prefetch is al deze cyclus gedaan, dus
+                # blijft skip_temp_prefetch=True.
+                climate_now = _time.time()
+                if climate_now - self._last_climate_poll >= self._vangnet_due_threshold:
+                    self._last_climate_poll = climate_now
+                    await self.fetch_climate_data(skip_temp_prefetch=True)
                 await self.fetch_outdoor_weather(data=sensor_data)
 
         except DigitalStromAuthError:

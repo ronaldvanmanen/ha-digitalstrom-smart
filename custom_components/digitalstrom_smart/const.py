@@ -451,6 +451,15 @@ POLL_INTERVAL_TEMPERATURE = 300  # 5 min for temp control values
 # events keep the fast path instant. User-tunable via the integration options.
 POLL_INTERVAL_BINARY = 30        # fallback reconcile for binary inputs
 
+# Vangnet-cadans voor de twee zwaarste per-cyclus-blokken: de Joker-ACTOR
+# live-confirm (getState + getOutputValue per actor, tot ~2×N calls) en de
+# per-zone climate-status-poll (getTemperatureControlStatus per zone, ~N calls).
+# BEIDE zijn puur vangnet — callScene-/stateChange-events houden switch en
+# klimaatstatus tussendoor live. Ze hoeven dus niet elke 30s-hoofdcyclus mee;
+# 1×/min is ruim voldoende en halveert hun dSS-last op grotere installs
+# (René, 26 aug 2026). Op de default 30s-hoofdpoll valt dit op elke twééde cyclus.
+POLL_INTERVAL_VANGNET = 60       # joker-actor confirm + climate-status vangnet
+
 # Bounds for the user-configurable poll intervals (Options flow).
 MIN_POLL_INTERVAL = 15
 MAX_POLL_INTERVAL = 300
