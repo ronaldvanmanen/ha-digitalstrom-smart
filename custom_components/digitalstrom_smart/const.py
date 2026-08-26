@@ -53,6 +53,20 @@ GROUP_NAMES = {
     GROUP_TEMP_CONTROL: "Temperature Control",
 }
 
+# Groups that may legitimately be configured at ZONE level without a physical
+# device present. Climate/HVAC control on the dSS is zone-based, so heating,
+# cooling, ventilation and temperature-control can exist on a zone that has no
+# dedicated actuator device. All OTHER groups (shade, light, audio, ...) require
+# a real actuator device and must therefore only be derived from device groups —
+# otherwise phantom entities appear in rooms that have no such device (e.g. a
+# cover entity in a room without any blinds/screens). See _parse_structure().
+ZONE_LEVEL_GROUPS = {
+    GROUP_HEATING,
+    GROUP_COOLING,
+    GROUP_VENTILATION,
+    GROUP_TEMP_CONTROL,
+}
+
 # --- dS Scene Numbers ---
 SCENE_OFF = 0
 SCENE_1 = 5       # Preset 1 (usually "on" / max)

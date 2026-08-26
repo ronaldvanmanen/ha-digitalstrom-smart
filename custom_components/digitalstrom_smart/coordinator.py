@@ -33,6 +33,7 @@ from .const import (
     GROUP_JOKER,
     GROUP_COOLING,
     GROUP_TEMP_CONTROL,
+    ZONE_LEVEL_GROUPS,
     SCENE_OFF,
     SCENE_1,
     SCENE_2,
@@ -268,11 +269,16 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     elif isinstance(group_entry, dict):
                         groups.add(group_entry.get("id", 0))
 
-            # Also check zone groups directly (include even without devices,
-            # as climate control can be configured at zone level)
+            # Also check zone groups directly, but ONLY for climate/HVAC groups
+            # (heating/cooling/ventilation/temp-control): those can be configured
+            # at zone level without a dedicated actuator device. Every other group
+            # (shade, light, audio, ...) requires a real device, so it must come
+            # from the device loop above — otherwise the dSS zone-group list adds
+            # e.g. GROUP_SHADE to rooms that have no blinds at all, creating phantom
+            # cover entities (reported by René, rooms zonder raambekleding).
             for zg in zone.get("groups", []):
                 gid = zg.get("group", zg.get("id", 0))
-                if gid:
+                if gid in ZONE_LEVEL_GROUPS:
                     groups.add(gid)
 
             self.zones[zone_id] = {
