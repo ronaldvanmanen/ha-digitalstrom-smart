@@ -46,6 +46,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     DOMAIN, MANUFACTURER, CONF_ENABLED_ZONES, GROUP_TEMP_CONTROL,
+    GROUP_LIGHT, GROUP_SHADE,
     SENSOR_TEMPERATURE, SENSOR_HUMIDITY, SENSOR_BRIGHTNESS, SENSOR_CO2,
     SENSOR_ACTIVE_POWER, SENSOR_ACTIVE_ENERGY,
     OUTDOOR_SENSOR_TRANSLATION_KEYS, DEVICE_SENSOR_TRANSLATION_KEYS,
@@ -164,6 +165,24 @@ async def async_setup_entry(
     for zone_id, zone_info in coordinator.zones.items():
         if enabled_zones and zone_id not in enabled_zones:
             continue
+
+        # --- FREE: Active-scene sensors (light + shade) ---
+        # Shows which dS scene is currently active in the zone (e.g. "Scene 1",
+        # "All off", a user-named scene). The scene state is already tracked by
+        # the coordinator from callScene events + getLastCalledScene.
+        zone_groups = zone_info.get("groups", [])
+        if GROUP_LIGHT in zone_groups:
+            entities.append(
+                DigitalStromActiveSceneSensor(
+                    coordinator, zone_id, zone_info, GROUP_LIGHT
+                )
+            )
+        if GROUP_SHADE in zone_groups:
+            entities.append(
+                DigitalStromActiveSceneSensor(
+                    coordinator, zone_id, zone_info, GROUP_SHADE
+                )
+            )
 
         if coordinator.has_temp_control(zone_id):
             # Zone with temperature control: current + target temp + heating output
@@ -350,6 +369,63 @@ class DigitalStromLicenseSensor(CoordinatorEntity, SensorEntity):
             "dss_id_sent": info.get("dss_id_sent", ""),
         }
         return attrs
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
+
+class DigitalStromActiveSceneSensor(CoordinatorEntity, SensorEntity):
+    """Shows which dS scene is currently active in a zone (light or shade).
+
+    The dSS keeps the last-called scene per zone/group; the coordinator tracks
+    it from callScene events and getLastCalledScene. This sensor surfaces that
+    as a readable name (e.g. "Scene 1", "All off", or a user-named scene), so a
+    user can see the physical scene state next to the on/off state (René, #idea).
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:movie-open-play"
+
+    def __init__(
+        self,
+        coordinator: DigitalStromCoordinator,
+        zone_id: int,
+        zone_info: dict,
+        group: int,
+    ) -> None:
+        super().__init__(coordinator)
+        self._zone_id = zone_id
+        self._group = group
+        dss_id = coordinator.dss_id
+        gkey = "light" if group == GROUP_LIGHT else "shade"
+        self._attr_unique_id = f"ds_{dss_id}_{zone_id}_active_scene_{gkey}"
+        self._attr_translation_key = f"active_scene_{gkey}"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{dss_id}_zone_{zone_id}")},
+            "name": zone_info["name"],
+            "manufacturer": MANUFACTURER,
+            "model": "Zone",
+            "suggested_area": zone_info["name"],
+        }
+
+    @property
+    def native_value(self) -> str | None:
+        state = self.coordinator.get_zone_state(self._zone_id, self._group)
+        scene = state.get("scene")
+        if scene is None:
+            return None
+        return self.coordinator.get_scene_display_name(
+            self._zone_id, self._group, scene
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        state = self.coordinator.get_zone_state(self._zone_id, self._group)
+        return {
+            "scene_number": state.get("scene"),
+            "is_on": state.get("is_on"),
+        }
 
     @callback
     def _handle_coordinator_update(self) -> None:

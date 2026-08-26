@@ -137,6 +137,12 @@
       },
       "license_status": {
         "name": "Licentie Status"
+      },
+      "active_scene_light": {
+        "name": "Actieve lichtscène"
+      },
+      "active_scene_shade": {
+        "name": "Actieve zonweringsscène"
       }
     },
     "light": {

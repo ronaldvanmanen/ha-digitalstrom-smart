@@ -137,6 +137,12 @@
       },
       "license_status": {
         "name": "License Status"
+      },
+      "active_scene_light": {
+        "name": "Active Light Scene"
+      },
+      "active_scene_shade": {
+        "name": "Active Shade Scene"
       }
     },
     "light": {

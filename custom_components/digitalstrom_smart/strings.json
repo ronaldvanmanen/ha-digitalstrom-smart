@@ -134,6 +134,12 @@
       },
       "device_co2": {
         "name": "CO2"
+      },
+      "active_scene_light": {
+        "name": "Active Light Scene"
+      },
+      "active_scene_shade": {
+        "name": "Active Shade Scene"
       }
     },
     "light": {
