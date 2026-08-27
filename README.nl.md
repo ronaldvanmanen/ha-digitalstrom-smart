@@ -23,8 +23,11 @@ Anders dan traditionele integraties die per apparaat pollen, gebruikt Digital St
 |--|---------------------|-------------------|
 | **Bedieningswijze** | Individuele apparaatcommando's | Zonescenes (één commando, alle apparaten reageren) |
 | **Status-updates** | Polling elke 10-30s per apparaat | Realtime event-abonnement |
-| **Busbelasting** | ~50+ verzoeken/min (10 zones) | ~0,4 verzoeken/min + 1 event-verbinding |
-| **Risico** | Kan apartments.xml beschadigen | Veilig — gebruikt alleen standaard-API-calls |
+| **dS485-buslezingen** | Eén seriële buslezing per apparaat, per poll | Geen in rusttoestand — event-gedreven; per-apparaat sensor-/vermogenspolling over de bus is uitgeschakeld |
+| **dSS web-API-belasting** | ~50+ verzoeken/min (10 zones), elk met een buslezing | ~25-35 lichte verzoeken/min, allemaal uit de dSS-cache + 1 permanente event-verbinding |
+| **Risico** | Kan de dSM-meetcontroller uithongeren en apartments.xml beschadigen | Veilig — alleen cache-bediende API-calls, geen per-apparaat buspolling |
+
+> **Over de werkelijke belasting (met dank aan René van der Gaag voor de tip).** Eerdere versies van deze tabel noemden "~0,4 verzoeken/min", en dat gaf een te rooskleurig beeld. De integratie houdt de **dS485-bus** inderdaad vrijwel stil — en dát is de belasting die telt, want per-apparaat buslezingen zijn wat de dSM-meetcontroller uithongert. Maar ze doet wél een bescheiden, gestage stroom **cache-bediende HTTP-calls** naar de dSS web-API: een apparaat-poll elke 5 s (contacten/deuren/uitgangsstanden, één `apartment/getDevices`-call), een cyclus van ~30 s met verbruik/temperatuur/stroomkring/status-calls, en één long-poll `event/get`-verbinding. Op een draaiende installatie komt dat neer op grofweg **25-35 verzoeken per minuut** (iets meer met de Pro klimaat-/sensorfuncties en veel Joker-actoren). Geen van deze raakt de dS485-bus, dus ze zijn goedkoop voor de dSS om te bedienen.
 
 ## Functies
 
@@ -243,6 +246,10 @@ Digital Strom Smart ondersteunt meerdere talen voor alle entiteitsnamen, configu
 Home Assistant gebruikt automatisch de juiste taal op basis van je systeemtaal. Een vertaling toevoegen? PR's zijn welkom — maak een nieuw JSON-bestand aan in `custom_components/digitalstrom_smart/translations/`.
 
 ## Wijzigingslog
+
+### v4.2.0-beta32 — Correcte documentatie van de dSS-belasting
+
+- **Vergelijkingstabel van de "belasting op de dSS" gecorrigeerd.** De oude tabel noemde "~0,4 verzoeken/min", wat de werkelijke waarde onderschatte. Ze onderscheidt nu **dS485-buslezingen** (blijven stil — dát is de belasting die telt voor de meetintegriteit) van **cache-bediende dSS web-API-calls** (~25-35/min op een draaiende installatie: de 5 s apparaat-poll, de 30 s cyclus en de event long-poll). Alleen documentatie — geen functionele wijziging. Met dank aan René van der Gaag voor het signaleren van de afwijking t.o.v. zijn live installatie.
 
 ### v4.1.4 (25-06-2026) — Regelwaarde-sensor (koel-/verwarmvraag uit de DS)
 

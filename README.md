@@ -23,8 +23,11 @@ Unlike traditional per-device polling integrations, Digital Strom Smart uses the
 |--|---------------------|-------------------|
 | **Control method** | Individual device commands | Zone scenes (one command, all devices respond) |
 | **State updates** | Polling every 10-30s per device | Real-time event subscription |
-| **Bus load** | ~50+ requests/min (10 zones) | ~0.4 requests/min + 1 event connection |
-| **Risk** | Can corrupt apartments.xml | Safe — uses only standard API calls |
+| **dS485 bus reads** | One serial bus read per device, per poll | None in steady state — event-driven; per-device sensor/power bus polling is disabled |
+| **dSS web-API load** | ~50+ requests/min (10 zones), each triggering a bus read | ~25-35 lightweight requests/min, all served from the dSS cache + 1 persistent event connection |
+| **Risk** | Can starve the dSM metering controller and corrupt apartments.xml | Safe — cache-served API calls only, no per-device bus polling |
+
+> **A note on real-world load (thanks to René van der Gaag for flagging this).** Earlier versions of this table claimed "~0.4 requests/min", which understated the actual figure. The integration does keep the **dS485 bus** essentially idle — that is the load that matters, because per-device bus reads are what starve the dSM metering controller. But it does make a modest, steady stream of **cache-served HTTP calls** to the dSS web API: a device poll every 5 s (contacts/doors/output states, one `apartment/getDevices` call), a ~30 s cycle of consumption/temperature/circuit/state calls, and one long-poll `event/get` connection. On a running installation that adds up to roughly **25-35 requests per minute** (a bit more with the Pro climate/sensor features and many Joker actuators). None of these touch the dS485 bus, so they are cheap for the dSS to serve.
 
 ## Features
 
@@ -247,6 +250,10 @@ Digital Strom Smart supports multiple languages for all entity names, configurat
 Home Assistant automatically uses the correct language based on your system language setting. Want to add a translation? PRs welcome — just create a new JSON file in `custom_components/digitalstrom_smart/translations/`.
 
 ## Changelog
+
+### v4.2.0-beta32 — Accurate dSS load documentation
+
+- **Corrected the "load on the dSS" comparison table.** The old table claimed "~0.4 requests/min", which understated the real figure. It now separates **dS485 bus reads** (kept idle — this is the load that matters for metering integrity) from **cache-served dSS web-API calls** (~25-35/min on a running install: the 5 s device poll, the 30 s cycle, and the event long-poll). Docs only — no functional change. Thanks to René van der Gaag for flagging the discrepancy against his live installation.
 
 ### v4.1.4 (2026-06-25) — Control value sensor (cooling/heating demand from DS)
 

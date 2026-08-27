@@ -23,8 +23,11 @@ Im Gegensatz zu herkömmlichen Integrationen, die jedes Gerät einzeln abfragen,
 |--|---------------------|-------------------|
 | **Steuerung** | Einzelne Gerätebefehle | Zonen-Szenen (ein Befehl, alle Geräte reagieren) |
 | **Status-Updates** | Polling alle 10-30s pro Gerät | Echtzeit Event-Subscription |
-| **Bus-Last** | ~50+ Anfragen/Min (10 Zonen) | ~0,4 Anfragen/Min + 1 Event-Verbindung |
-| **Risiko** | Kann apartments.xml beschädigen | Sicher — verwendet nur Standard-API-Aufrufe |
+| **dS485-Bus-Lesezugriffe** | Ein serieller Buszugriff pro Gerät, pro Poll | Keine im Ruhezustand — ereignisgesteuert; geräteweises Sensor-/Leistungs-Polling über den Bus ist deaktiviert |
+| **dSS-Web-API-Last** | ~50+ Anfragen/Min (10 Zonen), jede löst einen Buszugriff aus | ~25-35 leichte Anfragen/Min, alle aus dem dSS-Cache bedient + 1 dauerhafte Event-Verbindung |
+| **Risiko** | Kann den dSM-Metering-Controller aushungern und apartments.xml beschädigen | Sicher — nur cache-bediente API-Aufrufe, kein geräteweises Bus-Polling |
+
+> **Hinweis zur realen Last (Dank an René van der Gaag für den Hinweis).** Frühere Versionen dieser Tabelle nannten „~0,4 Anfragen/Min", was die tatsächliche Zahl untertrieb. Die Integration hält den **dS485-Bus** tatsächlich weitgehend im Leerlauf — und genau das ist die entscheidende Last, denn geräteweise Buszugriffe hungern den dSM-Metering-Controller aus. Sie erzeugt aber einen bescheidenen, stetigen Strom **cache-bedienter HTTP-Aufrufe** an die dSS-Web-API: ein Geräte-Poll alle 5 s (Kontakte/Türen/Ausgangszustände, ein `apartment/getDevices`-Aufruf), ein ~30-s-Zyklus mit Verbrauch/Temperatur/Stromkreis/Status-Aufrufen und eine Long-Poll-`event/get`-Verbindung. Auf einer laufenden Installation ergibt das rund **25-35 Anfragen pro Minute** (etwas mehr mit den Pro-Klima-/Sensorfunktionen und vielen Joker-Aktoren). Keiner davon berührt den dS485-Bus, daher sind sie für den dSS günstig zu bedienen.
 
 ## Funktionen
 
@@ -235,6 +238,10 @@ Digital Strom Smart unterstützt mehrere Sprachen für alle Entitätsnamen, Konf
 Home Assistant verwendet automatisch die richtige Sprache basierend auf Ihrer Systemspracheinstellung. Möchten Sie eine Übersetzung hinzufügen? PRs willkommen — erstellen Sie einfach eine neue JSON-Datei in `custom_components/digitalstrom_smart/translations/`.
 
 ## Änderungsprotokoll
+
+### v4.2.0-beta32 — Korrekte Dokumentation der dSS-Last
+
+- **Vergleichstabelle der „Last auf dem dSS" korrigiert.** Die alte Tabelle nannte „~0,4 Anfragen/Min" und untertrieb damit den realen Wert. Sie unterscheidet nun **dS485-Bus-Lesezugriffe** (bleiben im Leerlauf — das ist die für die Metering-Integrität entscheidende Last) von **cache-bedienten dSS-Web-API-Aufrufen** (~25-35/Min auf einer laufenden Installation: der 5-s-Geräte-Poll, der 30-s-Zyklus und der Event-Long-Poll). Nur Dokumentation — keine funktionale Änderung. Dank an René van der Gaag für den Hinweis auf die Abweichung gegenüber seiner Live-Installation.
 
 ### v4.1.4 (25.06.2026) — Regelwert-Sensor (Kühl-/Heizanforderung aus dem DS)
 
