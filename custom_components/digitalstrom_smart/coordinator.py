@@ -32,7 +32,10 @@ from .const import (
     GROUP_HEATING,
     GROUP_JOKER,
     GROUP_COOLING,
+    GROUP_VENTILATION,
     GROUP_TEMP_CONTROL,
+    VENTILATION_OUTPUT_OFFSETS,
+    UMR200_HW_MARKER,
     ZONE_LEVEL_GROUPS,
     SCENE_OFF,
     SCENE_1,
@@ -170,6 +173,9 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         self._joker_divergence_warned: set[str] = set()
         # Per-device runtime output status from apartment/getDevices: {dsuid: {"on", "is_present", "is_valid"}}
         self._device_runtime: dict[str, dict] = {}
+        # SW-UMR200 ventilation outputs: {dsuid: {offset: {"raw": 0..255, "pct": 0..100}}}
+        # Filled from getOutputValue per output offset — the direct relay read.
+        self._ventilation_outputs: dict[str, dict[int, dict]] = {}
 
         # Metering data
         self._circuit_power: dict[str, int] = {}  # dsuid -> watts
@@ -419,6 +425,10 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         # keer bevestigd (getState + getOutputValue), tegen de pre-settle boot-'false' die
         # René's SW-KL fout op UIT zette (22 aug 2026).
         await self.fetch_joker_actuator_states(confirm_startup=True)
+
+        # Seed SW-UMR200 ventilation output levels so the entities have a value
+        # immediately (getOutputValue per output offset — the direct relay read).
+        await self.fetch_ventilation_outputs()
 
         # Fetch all dSS /usr/states in one call: fire/rain/alarm + day-night/holiday +
         # motion per zone + malfunction/service. Plus weather-service outdoor + sun.
@@ -1827,6 +1837,56 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         return [d for d in self.get_joker_devices_in_zone(zone_id)
                 if d.get("output_mode", 0) > 0 and d.get("binary_inputs")]
 
+    def get_umr200_devices(self) -> list[dict]:
+        """All SW-UMR200 actuator devices (across zones).
+
+        Identified by hwInfo — a UMR200 always exposes 2 outputs (offset 0/1),
+        each of which may drive a ventilation unit. We do NOT gate on the dS
+        color group here: an output can be configured blue (climate, group 3)
+        or as ventilation (group 10) or left black (Joker, group 8), and René
+        wants the raw output level in all cases so a dashboard can build the
+        ventilation status itself.
+        """
+        out = []
+        for dsuid, dev in self.devices.items():
+            hw = (dev.get("hw_info") or "")
+            if UMR200_HW_MARKER in hw and int(dev.get("output_mode", 0) or 0) > 0:
+                out.append(dev)
+        return out
+
+    async def fetch_ventilation_outputs(self) -> None:
+        """Read the raw relay output level of every SW-UMR200 output.
+
+        getOutputValue (0..255) is the direct relay read — independent of the
+        stale getDevices ``on`` cache and of the isOn divergence that plagues
+        Joker actors. For each UMR200 we read both output offsets (0 and 1) and
+        store raw + percentage. Runs on the ~1×/min vangnet cadence, so at most
+        2 extra calls per UMR200 per minute.
+        """
+        for dev in self.get_umr200_devices():
+            dsuid = dev.get("dsuid")
+            if not dsuid:
+                continue
+            per_offset: dict[int, dict] = {}
+            for offset in VENTILATION_OUTPUT_OFFSETS:
+                try:
+                    raw = await self.api.get_device_output_value(dsuid, offset)
+                except Exception as err:
+                    _LOGGER.debug(
+                        "UMR200 %s (%s) getOutputValue offset=%d faalde: %s",
+                        dsuid[:12], dev.get("name", ""), offset, err,
+                    )
+                    continue
+                raw = int(raw or 0)
+                pct = round(max(0, min(255, raw)) / 255 * 100)
+                per_offset[offset] = {"raw": raw, "pct": pct}
+            if per_offset:
+                self._ventilation_outputs[dsuid] = per_offset
+
+    def get_ventilation_output(self, dsuid: str, offset: int) -> dict | None:
+        """Last-known {'raw', 'pct'} for a UMR200 output, or None if not polled yet."""
+        return self._ventilation_outputs.get(dsuid, {}).get(offset)
+
     # =====================================================================
     # Event listener
     # =====================================================================
@@ -2204,6 +2264,9 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
             if poll_now - self._last_joker_confirm >= self._vangnet_due_threshold:
                 self._last_joker_confirm = poll_now
                 await self.fetch_joker_actuator_states()
+                # SW-UMR200 ventilation output levels ride the same vangnet cadence
+                # (2 getOutputValue calls per UMR200 per minute — negligible load).
+                await self.fetch_ventilation_outputs()
 
             # dSS /usr/states backup-poll (events keep these live in between).
             await self.fetch_dss_states()

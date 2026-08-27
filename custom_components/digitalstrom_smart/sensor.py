@@ -50,6 +50,7 @@ from .const import (
     SENSOR_TEMPERATURE, SENSOR_HUMIDITY, SENSOR_BRIGHTNESS, SENSOR_CO2,
     SENSOR_ACTIVE_POWER, SENSOR_ACTIVE_ENERGY,
     OUTDOOR_SENSOR_TRANSLATION_KEYS, DEVICE_SENSOR_TRANSLATION_KEYS,
+    VENTILATION_OUTPUT_OFFSETS,
 )
 from .coordinator import DigitalStromCoordinator
 
@@ -287,6 +288,18 @@ async def async_setup_entry(
 
     # Configurator timers/klokken are exposed as switch entities only
     # (one entity per timer to avoid duplicated sensor+switch pairs).
+
+    # --- FREE: SW-UMR200 ventilation level (%) per output ---
+    # The raw relay level (0..255) as a 0-100% value, so a dashboard can show
+    # the actual ventilation level next to the on/off status (binary_sensor).
+    for dev in coordinator.get_umr200_devices():
+        zone_id = dev.get("zone_id")
+        if enabled_zones and zone_id not in enabled_zones:
+            continue
+        for offset in VENTILATION_OUTPUT_OFFSETS:
+            entities.append(
+                DigitalStromVentilationLevel(coordinator, dev, offset)
+            )
 
     async_add_entities(entities)
 
@@ -876,6 +889,61 @@ class DigitalStromUserStateSensor(CoordinatorEntity, SensorEntity):
             return str(state)
         value = data.get("value")
         return str(value) if value is not None else None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
+
+class DigitalStromVentilationLevel(CoordinatorEntity, SensorEntity):
+    """Ventilation output level (%) for one SW-UMR200 output.
+
+    The raw relay level (getOutputValue, 0..255) mapped to 0-100%. Paired with
+    the ventilatiestatus binary_sensor (>10% = on). Read-only. Free.
+    """
+
+    _attr_has_entity_name = True
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_icon = "mdi:fan"
+
+    def __init__(
+        self,
+        coordinator: DigitalStromCoordinator,
+        dev: dict,
+        offset: int,
+    ) -> None:
+        super().__init__(coordinator)
+        self._dsuid = dev["dsuid"]
+        self._offset = offset
+        dss_id = coordinator.dss_id
+        zone_id = dev.get("zone_id", 0)
+        dev_name = dev.get("name") or self._dsuid[:8]
+        self._attr_unique_id = f"ds_{dss_id}_dev_{self._dsuid}_ventlevel_{offset}"
+        self._attr_name = f"{dev_name} ventilatieniveau uitgang {offset + 1}"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{dss_id}_zone_{zone_id}")},
+            "name": dev.get("zone_name", ""),
+            "manufacturer": MANUFACTURER,
+            "model": "Zone",
+            "suggested_area": dev.get("zone_name", ""),
+        }
+
+    @property
+    def native_value(self) -> int | None:
+        data = self.coordinator.get_ventilation_output(self._dsuid, self._offset)
+        if not data:
+            return None
+        return data.get("pct")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        data = self.coordinator.get_ventilation_output(self._dsuid, self._offset) or {}
+        return {
+            "raw_output": data.get("raw"),
+            "output": self._offset + 1,
+            "dsuid": self._dsuid,
+        }
 
     @callback
     def _handle_coordinator_update(self) -> None:

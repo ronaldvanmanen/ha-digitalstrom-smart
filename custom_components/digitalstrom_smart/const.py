@@ -347,6 +347,16 @@ OUTDOOR_SENSOR_TRANSLATION_KEYS = {
     "rain": "rain_intensity",
 }
 
+# --- Ventilation (SW-UMR200 outputs) ---
+# A SW-UMR200 always has exactly 2 outputs (offset 0 and 1). When an output
+# drives a ventilation unit, its running level is the raw relay output value
+# (getOutputValue, 0..255). René (DS expert, 27 aug 2026): treat >10% as ON,
+# <=10% as OFF, so a stationary ~5% rest level reads as OFF (the plain >0
+# actor logic would wrongly show ON). 10% of 255 = 25.5, so raw > 25 is ON.
+VENTILATION_ON_THRESHOLD_PCT = 10
+VENTILATION_OUTPUT_OFFSETS = (0, 1)
+UMR200_HW_MARKER = "UMR200"
+
 # --- dS Sensor Types ---
 SENSOR_ACTIVE_POWER = 4    # Watt — SW-KL200, SW-ZWS200, SW-SSL200, SW-UMR200
 SENSOR_ACTIVE_ENERGY = 5   # Wh cumulative — SW-KL200, SW-ZWS200, SW-SSL200, SW-UMR200
