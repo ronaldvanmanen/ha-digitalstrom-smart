@@ -241,11 +241,17 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         self.entry_id: str | None = None
         self._license_last_check: float = 0.0
 
-        # Opt-in whitelist of UMR200 output dsuids that drive ventilation but are
-        # configured outside the dS Ventilation colour group (e.g. Joker/black).
-        # Set from the options flow (CONF_EXTRA_VENTILATION_DSUIDS). Empty by
-        # default → the strict GROUP_VENTILATION gate stays in force.
+        # Opt-in whitelist of UMR200 output dsuids that drive ventilation but do
+        # NOT surface GROUP_VENTILATION (10) in their device groups array — e.g.
+        # René's Woningventilatie outputs, configured blue/Woningventilatie in
+        # the dSS yet reporting only group 8 in config_group. Set from the
+        # options flow (CONF_EXTRA_VENTILATION_DSUIDS). Empty by default → the
+        # strict GROUP_VENTILATION gate stays in force.
         self.extra_ventilation_dsuids: set[str] = set()
+
+        # dsuids whose raw getStructure entry we already dumped once (beta38
+        # UMR200 group-diagnostic). Prevents log flood on every refresh.
+        self._umr200_raw_logged: set[str] = set()
 
     def button_devices(self) -> dict[str, dict]:
         """Devices that emit dSS ``buttonClick`` events (rockers / pushbuttons).
@@ -333,6 +339,28 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                         "value": sensor.get("value"),
                     })
                 self.devices[dsuid] = dev_info
+
+                # beta38 UMR200 group-diagnostic (René, 28 aug 2026): dump the
+                # RAW getStructure entry for every UMR200 once, at INFO, so a
+                # "Woningventilatie" output that does NOT report GROUP_VENTILATION
+                # (10) reveals what the dSS actually returns — the untransformed
+                # groups array (dicts may carry more than id), functionID,
+                # outputMode and any system-function / apartment-level field.
+                # This is the exact data needed to decide between a second group
+                # constant (GROUP_HOME_VENTILATION / Recirculation 12) and reading
+                # the output-channel group elsewhere in the response. One line per
+                # dsuid per session → no log flood.
+                if (UMR200_HW_MARKER in dev_info["hw_info"]
+                        and dsuid not in self._umr200_raw_logged):
+                    self._umr200_raw_logged.add(dsuid)
+                    _LOGGER.info(
+                        "UMR200 RAW-DIAG %s (%s | zone '%s'): "
+                        "raw_groups=%s functionID=%s outputMode=%s all_keys=%s",
+                        dsuid, dev.get("name", ""), zone_name,
+                        dev.get("groups"), dev.get("functionID"),
+                        dev.get("outputMode"), sorted(dev.keys()),
+                    )
+
                 self.zones[zone_id]["devices"].append(dsuid)
 
                 # Initialize device on/off state from structure
@@ -1857,13 +1885,17 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         UMR200 (light/Joker included) as ventilation, with sensor/switch names
         wrongly containing "ventilatie". Gating on the colour group fixes that.
 
-        René (28 aug 2026): some installs drive the house ventilation from a
-        UMR200 that is configured as Joker (black), not Ventilation (group 10) —
-        the strict gate then correctly excludes it, but those outputs really are
-        ventilation. So there is an opt-in escape hatch: any dsuid listed in
-        ``self.extra_ventilation_dsuids`` (options flow) is admitted regardless
-        of its colour group. Default is empty → no change to default behaviour,
-        the broad-mislabelling risk from beta33 stays gone.
+        René (28 aug 2026, correctie): his two Overloop outputs are configured
+        as *Woningventilatie* in the dSS — a function of the blue climate colour
+        group, NOT Joker — yet their device groups array surfaces only group 8,
+        not GROUP_VENTILATION (10). So the strict gate wrongly excludes genuine
+        ventilation outputs. Until the root cause is pinned (see the beta38
+        UMR200 RAW-DIAG dump in _parse_structure — is it a second group number
+        such as Recirculation 12, or an output-channel field?), there is an
+        opt-in escape hatch: any dsuid listed in ``self.extra_ventilation_dsuids``
+        (options flow) is admitted regardless of its colour group. Default is
+        empty → no change to default behaviour, the broad-mislabelling risk from
+        beta33 stays gone.
         """
         out = []
         for dsuid, dev in self.devices.items():
