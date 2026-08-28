@@ -509,6 +509,22 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         'false' wordt bevestigd. De 30s-hoofdpoll blijft het uiteindelijke vangnet.
         """
         seen: set[str] = set()
+        # Ventilatie-UMR200-uitgangen rusten op ~5% (raw ~13). getState.isOn geeft
+        # voor élk niveau >0 'true', dus de Joker-switch zou bij dat rustniveau AAN
+        # tonen terwijl de ventilatiestatus-sensor (10%-drempel) correct 'Niet actief'
+        # toont — precies de "verkeerde beginwaarde na herstart" die René meldde
+        # (SEED-DIAG beta40, 28 aug 2026: raw=13 pct=5% running=False; joker on_state=true).
+        # Voor deze uitgangen geldt: output op/onder de ventilatiedrempel = fysiek UIT,
+        # zodat switch én sensor met het relais overeenkomen. Commando's blijven gelijk.
+        vent_dsuids = {d.get("dsuid") for d in self.get_umr200_devices() if d.get("dsuid")}
+
+        def _vent_output_is_off(raw: int) -> bool:
+            """True als een ventilatie-uitgang op/onder de drempel (rust) staat."""
+            if raw < 0:
+                return False
+            pct = round(max(0, min(255, raw)) / 255 * 100)
+            return pct <= VENTILATION_ON_THRESHOLD_PCT
+
         # (zone_id, dsuid, dev) waarvan de eerste seed 'false' was en die na settle
         # opnieuw gecheckt moeten worden — alleen relevant bij (her)start.
         pending_confirm: list[tuple[int, str, dict]] = []
@@ -553,7 +569,8 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                             _LOGGER.debug(
                                 "Joker-actor runtime getOutputValue faalde %s: %s", dsuid, err
                             )
-                        if run_out_val == 0:
+                        vent_rest = dsuid in vent_dsuids and _vent_output_is_off(run_out_val)
+                        if run_out_val == 0 or vent_rest:
                             resolved = False
                             # Edge-triggered: één WARNING per divergentie-episode. Een
                             # blijvende isOn-leugen corrigeren we elke poll (goed), maar
@@ -561,11 +578,20 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                             # Zolang de episode duurt → debug; nieuwe episode → weer WARNING.
                             if dsuid not in self._joker_divergence_warned:
                                 self._joker_divergence_warned.add(dsuid)
-                                _LOGGER.warning(
-                                    "[DS-DEBUG] Joker-actor %s (%s) DIVERGENTIE: getState.isOn=true "
-                                    "maar getOutputValue=0 (relais fysiek UIT) -> gecorrigeerd naar UIT",
-                                    dsuid, dev.get("name", ""),
-                                )
+                                if vent_rest:
+                                    _LOGGER.warning(
+                                        "[DS-DEBUG] Ventilatie-actor %s (%s) DIVERGENTIE: getState.isOn=true "
+                                        "maar getOutputValue=%s op/onder %d%%-rustdrempel (fysiek UIT) "
+                                        "-> gecorrigeerd naar UIT (gelijk aan ventilatiestatus-sensor)",
+                                        dsuid, dev.get("name", ""), run_out_val,
+                                        VENTILATION_ON_THRESHOLD_PCT,
+                                    )
+                                else:
+                                    _LOGGER.warning(
+                                        "[DS-DEBUG] Joker-actor %s (%s) DIVERGENTIE: getState.isOn=true "
+                                        "maar getOutputValue=0 (relais fysiek UIT) -> gecorrigeerd naar UIT",
+                                        dsuid, dev.get("name", ""),
+                                    )
                             else:
                                 _LOGGER.debug(
                                     "[DS-DEBUG] Joker-actor %s (%s) DIVERGENTIE houdt aan "
@@ -602,6 +628,20 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                             "outputValue=%s (seed=getState)",
                             dsuid, is_on, seed_out_val,
                         )
+                        # Ventilatie-uitgang op rustniveau (raw ~13 = 5%): getState.isOn
+                        # geeft 'true', maar fysiek staat de ventilatie UIT. Seed de switch
+                        # meteen als UIT zodat hij ná herstart niet ten onrechte AAN toont
+                        # (de "verkeerde beginwaarde" die René meldde). SEED-DIAG beta40.
+                        if is_on and dsuid in vent_dsuids and _vent_output_is_off(seed_out_val):
+                            resolved = False
+                            self._device_on_states[dsuid] = False
+                            _LOGGER.info(
+                                "Ventilatie-UMR200 %s (%s): getState.isOn=true maar output raw=%s "
+                                "op/onder %d%%-rustdrempel -> switch geseed als UIT (gelijk aan "
+                                "ventilatiestatus-sensor)",
+                                dsuid[:12], dev.get("name", ""), seed_out_val,
+                                VENTILATION_ON_THRESHOLD_PCT,
+                            )
                     elif old_on != resolved:
                         # Externe wijziging die geen callScene-event opleverde (of gemist
                         # tijdens een event-loop reconnect): de 30s live getState-refresh
