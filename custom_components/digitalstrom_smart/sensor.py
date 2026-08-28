@@ -300,6 +300,11 @@ async def async_setup_entry(
             # Only expose an output the dSS actually reported a level for; skip
             # an unused second output that returns no value (René, 28 aug 2026).
             if coordinator.get_ventilation_output(dev["dsuid"], offset) is None:
+                _LOGGER.debug(
+                    "UMR200 %s (%s): geen output op offset=%d bij seed-poll — "
+                    "sla ventilatieniveau-entiteit voor deze uitgang over",
+                    dev["dsuid"][:12], dev.get("name", ""), offset,
+                )
                 continue
             entities.append(
                 DigitalStromVentilationLevel(coordinator, dev, offset)

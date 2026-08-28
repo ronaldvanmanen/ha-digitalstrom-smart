@@ -171,6 +171,11 @@ async def async_setup_entry(
             # returns no value (René: 'ventilatieniveau uitgang 2 bestaat niet')
             # → skip it instead of creating a phantom entity without value.
             if coordinator.get_ventilation_output(dev["dsuid"], offset) is None:
+                _LOGGER.debug(
+                    "UMR200 %s (%s): geen output op offset=%d bij seed-poll — "
+                    "sla ventilatiestatus-entiteit voor deze uitgang over",
+                    dev["dsuid"][:12], dev.get("name", ""), offset,
+                )
                 continue
             entities.append(
                 DigitalStromVentilationStatus(coordinator, dev, offset)
