@@ -20,6 +20,7 @@ from .const import (
     CONF_PRO_LICENSE,
     CONF_MAIN_POLL_INTERVAL,
     CONF_BINARY_POLL_INTERVAL,
+    CONF_EXTRA_VENTILATION_DSUIDS,
     DEFAULT_MAIN_POLL_INTERVAL,
     DEFAULT_BINARY_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
@@ -309,6 +310,7 @@ class DigitalStromOptionsFlow(config_entries.OptionsFlow):
         current_binary = entry.options.get(
             CONF_BINARY_POLL_INTERVAL, DEFAULT_BINARY_POLL_INTERVAL
         )
+        current_extra_vent = entry.options.get(CONF_EXTRA_VENTILATION_DSUIDS, "")
 
         interval_selector = vol.All(
             vol.Coerce(int),
@@ -333,6 +335,10 @@ class DigitalStromOptionsFlow(config_entries.OptionsFlow):
                     CONF_BINARY_POLL_INTERVAL,
                     default=current_binary,
                 ): interval_selector,
+                vol.Optional(
+                    CONF_EXTRA_VENTILATION_DSUIDS,
+                    default=current_extra_vent,
+                ): str,
             }
         )
 

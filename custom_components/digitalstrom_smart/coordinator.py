@@ -241,6 +241,12 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         self.entry_id: str | None = None
         self._license_last_check: float = 0.0
 
+        # Opt-in whitelist of UMR200 output dsuids that drive ventilation but are
+        # configured outside the dS Ventilation colour group (e.g. Joker/black).
+        # Set from the options flow (CONF_EXTRA_VENTILATION_DSUIDS). Empty by
+        # default → the strict GROUP_VENTILATION gate stays in force.
+        self.extra_ventilation_dsuids: set[str] = set()
+
     def button_devices(self) -> dict[str, dict]:
         """Devices that emit dSS ``buttonClick`` events (rockers / pushbuttons).
 
@@ -1850,6 +1856,14 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         ventilation unit. beta33 gated on hwInfo alone and so mislabelled every
         UMR200 (light/Joker included) as ventilation, with sensor/switch names
         wrongly containing "ventilatie". Gating on the colour group fixes that.
+
+        René (28 aug 2026): some installs drive the house ventilation from a
+        UMR200 that is configured as Joker (black), not Ventilation (group 10) —
+        the strict gate then correctly excludes it, but those outputs really are
+        ventilation. So there is an opt-in escape hatch: any dsuid listed in
+        ``self.extra_ventilation_dsuids`` (options flow) is admitted regardless
+        of its colour group. Default is empty → no change to default behaviour,
+        the broad-mislabelling risk from beta33 stays gone.
         """
         out = []
         for dsuid, dev in self.devices.items():
@@ -1858,7 +1872,9 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 continue
             if int(dev.get("output_mode", 0) or 0) <= 0:
                 continue
-            if GROUP_VENTILATION not in dev.get("groups", []):
+            in_vent_group = GROUP_VENTILATION in dev.get("groups", [])
+            whitelisted = dsuid.lower() in self.extra_ventilation_dsuids
+            if not (in_vent_group or whitelisted):
                 continue
             out.append(dev)
         return out

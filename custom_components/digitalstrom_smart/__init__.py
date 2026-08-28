@@ -27,6 +27,7 @@ from .const import (
     CONF_PRO_LICENSE,
     CONF_MAIN_POLL_INTERVAL,
     CONF_BINARY_POLL_INTERVAL,
+    CONF_EXTRA_VENTILATION_DSUIDS,
     DEFAULT_MAIN_POLL_INTERVAL,
     DEFAULT_BINARY_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
@@ -141,6 +142,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         main_poll_interval=main_interval,
         binary_poll_interval=binary_interval,
     )
+
+    # Opt-in: UMR200 ventilation outputs configured outside the dS Ventilation
+    # colour group (e.g. Joker/black). Parse the CSV option into a lowercased
+    # set so get_umr200_devices() admits them regardless of colour group. Must
+    # be set BEFORE the first refresh so the initial ventilation poll includes
+    # them. Empty by default → strict group gate unchanged.
+    raw_extra = entry.options.get(CONF_EXTRA_VENTILATION_DSUIDS, "") or ""
+    coordinator.extra_ventilation_dsuids = {
+        d.strip().lower() for d in raw_extra.replace("\n", ",").split(",") if d.strip()
+    }
+    if coordinator.extra_ventilation_dsuids:
+        _LOGGER.info(
+            "Extra ventilation UMR200 dsuids (opt-in, outside Ventilation group): %s",
+            ", ".join(sorted(coordinator.extra_ventilation_dsuids)),
+        )
 
     # Check Pro license. Store the key + entry id on the coordinator so it can
     # re-validate periodically (picks up a server-side rebind without a restart).

@@ -470,6 +470,12 @@ CONF_INVERT_COVER = "invert_cover_position"
 CONF_PRO_LICENSE = "pro_license_key"
 CONF_MAIN_POLL_INTERVAL = "main_poll_interval"
 CONF_BINARY_POLL_INTERVAL = "binary_poll_interval"
+# Opt-in whitelist: dsuids of UMR200 outputs that drive a ventilation unit but
+# are configured outside the dS Ventilation colour group (e.g. as Joker/black).
+# These are treated as ventilation outputs regardless of their colour group.
+# CSV of dsuids. Empty by default → strict GROUP_VENTILATION gate stays in force.
+# René (28 aug 2026): his "Overloop Ventilatie" UMR200 outputs are Joker-config.
+CONF_EXTRA_VENTILATION_DSUIDS = "extra_ventilation_dsuids"
 
 # --- Platforms ---
 # Free platforms (always loaded)
