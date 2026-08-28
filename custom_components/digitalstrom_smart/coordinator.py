@@ -35,6 +35,7 @@ from .const import (
     GROUP_VENTILATION,
     GROUP_TEMP_CONTROL,
     VENTILATION_OUTPUT_OFFSETS,
+    VENTILATION_ON_THRESHOLD_PCT,
     UMR200_HW_MARKER,
     ZONE_LEVEL_GROUPS,
     SCENE_OFF,
@@ -198,6 +199,15 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         # beta38 crashed on setup with AttributeError because this set was only
         # created further down, after the parse call).
         self._umr200_raw_logged: set[str] = set()
+
+        # dsuid/offset pairs whose STARTUP seed trio we already dumped once
+        # (beta40 SEED-DIAG). René (28 aug 2026): a Woningventilatie UMR200 output
+        # shows a wrong INITIAL value right after a restart, then self-corrects.
+        # These outputs are group 8 (Joker) + 64, so they seed from TWO sources at
+        # boot — getState.isOn (the Joker control switch) and getOutputValue (the
+        # ventilation-status sensor). To see which source is wrong at boot without
+        # asking René to enable full debug, log both side by side once per session.
+        self._umr200_seed_logged: set[str] = set()
 
         # Parse structure into zones and devices
         self.zones: dict[int, dict] = {}
@@ -1940,6 +1950,26 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 raw = int(raw or 0)
                 pct = round(max(0, min(255, raw)) / 255 * 100)
                 per_offset[offset] = {"raw": raw, "pct": pct}
+
+                # SEED-DIAG (beta40, René 28 aug 2026): once per session, dump the
+                # startup seed trio for this UMR200 output so the "wrong initial
+                # value after restart" is diagnosable at INFO (no debug needed).
+                # A group-8+64 Woningventilatie output surfaces as BOTH a Joker
+                # control switch (is_on = getState.isOn seed) AND a ventilation
+                # status sensor (running = getOutputValue > threshold). If those
+                # two disagree at boot, that IS the wrong initial value. Log both.
+                seed_key = f"{dsuid}:{offset}"
+                if seed_key not in self._umr200_seed_logged:
+                    self._umr200_seed_logged.add(seed_key)
+                    running = pct > VENTILATION_ON_THRESHOLD_PCT
+                    _LOGGER.info(
+                        "UMR200 SEED-DIAG %s (%s | zone '%s') offset=%d: "
+                        "getOutputValue raw=%d pct=%d%% -> ventilatiestatus running=%s "
+                        "(drempel %d%%); joker-switch on_state=%s; groups=%s",
+                        dsuid, dev.get("name", ""), dev.get("zone_name", ""), offset,
+                        raw, pct, running, VENTILATION_ON_THRESHOLD_PCT,
+                        self.get_device_on_state(dsuid), dev.get("groups", []),
+                    )
             if per_offset:
                 self._ventilation_outputs[dsuid] = per_offset
 
