@@ -491,10 +491,13 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     # een mislezing (-1) of een echte >0 laat isOn ongemoeid. De seed/startup-tak
                     # (old_on is None) blijft onveranderd.
                     resolved = is_on
-                    if not confirm_startup and old_on is not None and not is_on:
-                        # getState meldt weer 'false': divergentie-episode voorbij,
-                        # WARNING her-bewapenen voor een eventuele volgende episode.
-                        self._joker_divergence_warned.discard(dsuid)
+                    # BEWUST GEEN her-bewapening op een kale isOn=false (René, 28 aug 2026,
+                    # beta34). Een divergente Joker-actor die fysiek UIT blijft laat isOn
+                    # herhaald false->true->false flip-floppen; her-bewapenen op elke 'false'
+                    # gaf dan bij elke volgende 'true' opnieuw een WARNING -> log-flood +
+                    # terugkerende HA-errorbanner (precies wat de edge-trigger wilde vermijden).
+                    # We her-bewapenen daarom UITSLUITEND na een bevestigd fysiek-AAN
+                    # (getOutputValue>0, zie onder): pas dan is de episode echt voorbij.
                     if not confirm_startup and old_on is not None and is_on:
                         run_out_val = -1
                         try:
