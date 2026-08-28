@@ -166,6 +166,12 @@ async def async_setup_entry(
         if enabled_zones and zone_id not in enabled_zones:
             continue
         for offset in VENTILATION_OUTPUT_OFFSETS:
+            # Only expose an output the dSS actually reported a level for. A
+            # UMR200 may use just one of its two outputs; the unused offset
+            # returns no value (René: 'ventilatieniveau uitgang 2 bestaat niet')
+            # → skip it instead of creating a phantom entity without value.
+            if coordinator.get_ventilation_output(dev["dsuid"], offset) is None:
+                continue
             entities.append(
                 DigitalStromVentilationStatus(coordinator, dev, offset)
             )

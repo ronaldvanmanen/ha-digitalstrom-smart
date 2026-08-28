@@ -297,6 +297,10 @@ async def async_setup_entry(
         if enabled_zones and zone_id not in enabled_zones:
             continue
         for offset in VENTILATION_OUTPUT_OFFSETS:
+            # Only expose an output the dSS actually reported a level for; skip
+            # an unused second output that returns no value (René, 28 aug 2026).
+            if coordinator.get_ventilation_output(dev["dsuid"], offset) is None:
+                continue
             entities.append(
                 DigitalStromVentilationLevel(coordinator, dev, offset)
             )

@@ -1841,20 +1841,26 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 if d.get("output_mode", 0) > 0 and d.get("binary_inputs")]
 
     def get_umr200_devices(self) -> list[dict]:
-        """All SW-UMR200 actuator devices (across zones).
+        """SW-UMR200 actuators whose output is configured for VENTILATION.
 
-        Identified by hwInfo — a UMR200 always exposes 2 outputs (offset 0/1),
-        each of which may drive a ventilation unit. We do NOT gate on the dS
-        color group here: an output can be configured blue (climate, group 3)
-        or as ventilation (group 10) or left black (Joker, group 8), and René
-        wants the raw output level in all cases so a dashboard can build the
-        ventilation status itself.
+        Identified by hwInfo (the UMR200 hardware) AND membership of the dS
+        ventilation group (GROUP_VENTILATION = 10). René (28 aug 2026): a
+        UMR200 configured as yellow (light, group 1) or black (Joker, group 8)
+        must NOT get ventilation entities — only outputs that actually drive a
+        ventilation unit. beta33 gated on hwInfo alone and so mislabelled every
+        UMR200 (light/Joker included) as ventilation, with sensor/switch names
+        wrongly containing "ventilatie". Gating on the colour group fixes that.
         """
         out = []
         for dsuid, dev in self.devices.items():
             hw = (dev.get("hw_info") or "")
-            if UMR200_HW_MARKER in hw and int(dev.get("output_mode", 0) or 0) > 0:
-                out.append(dev)
+            if UMR200_HW_MARKER not in hw:
+                continue
+            if int(dev.get("output_mode", 0) or 0) <= 0:
+                continue
+            if GROUP_VENTILATION not in dev.get("groups", []):
+                continue
+            out.append(dev)
         return out
 
     async def fetch_ventilation_outputs(self) -> None:
