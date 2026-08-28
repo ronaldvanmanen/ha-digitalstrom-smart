@@ -192,6 +192,13 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         # id -> {"name", "last_executed", "enabled", "time_base", "offset", ...}
         self._timed_events: dict[str, dict] = {}
 
+        # dsuids whose raw getStructure entry we already dumped once (beta38
+        # UMR200 group-diagnostic). Must be initialised BEFORE _parse_structure
+        # runs — the diagnostic gate in _parse_structure reads it (beta39 fix:
+        # beta38 crashed on setup with AttributeError because this set was only
+        # created further down, after the parse call).
+        self._umr200_raw_logged: set[str] = set()
+
         # Parse structure into zones and devices
         self.zones: dict[int, dict] = {}
         self.devices: dict[str, dict] = {}  # dsuid -> device info
@@ -248,10 +255,6 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         # options flow (CONF_EXTRA_VENTILATION_DSUIDS). Empty by default → the
         # strict GROUP_VENTILATION gate stays in force.
         self.extra_ventilation_dsuids: set[str] = set()
-
-        # dsuids whose raw getStructure entry we already dumped once (beta38
-        # UMR200 group-diagnostic). Prevents log flood on every refresh.
-        self._umr200_raw_logged: set[str] = set()
 
     def button_devices(self) -> dict[str, dict]:
         """Devices that emit dSS ``buttonClick`` events (rockers / pushbuttons).
