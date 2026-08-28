@@ -33,6 +33,7 @@ from .const import (
     GROUP_JOKER,
     GROUP_COOLING,
     GROUP_VENTILATION,
+    GROUP_HOME_VENTILATION,
     GROUP_TEMP_CONTROL,
     VENTILATION_OUTPUT_OFFSETS,
     VENTILATION_ON_THRESHOLD_PCT,
@@ -1941,14 +1942,19 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         René (28 aug 2026, correctie): his two Overloop outputs are configured
         as *Woningventilatie* in the dSS — a function of the blue climate colour
         group, NOT Joker — yet their device groups array surfaces only group 8,
-        not GROUP_VENTILATION (10). So the strict gate wrongly excludes genuine
-        ventilation outputs. Until the root cause is pinned (see the beta38
-        UMR200 RAW-DIAG dump in _parse_structure — is it a second group number
-        such as Recirculation 12, or an output-channel field?), there is an
-        opt-in escape hatch: any dsuid listed in ``self.extra_ventilation_dsuids``
-        (options flow) is admitted regardless of its colour group. Default is
-        empty → no change to default behaviour, the broad-mislabelling risk from
-        beta33 stays gone.
+        not GROUP_VENTILATION (10). The beta40 SEED-DIAG pinned the root cause:
+        such an output reports ``groups=[8, 64]``. René confirmed (28 aug 2026)
+        that de dSS group 64 (GROUP_HOME_VENTILATION) AUTOMATICALLY zodra een
+        UMR200-poort op de blauwe Woningventilatie-functie wordt gezet. Group 64
+        is therefore a reliable automatic marker: any UMR200 output carrying it
+        is admitted without needing the manual whitelist.
+
+        The opt-in ``self.extra_ventilation_dsuids`` whitelist (options flow) is
+        kept as a harmless vangnet for exotic setups, but is no longer needed for
+        a standard Woningventilatie output. Default whitelist is empty → the
+        broad-mislabelling risk from beta33 (every UMR200 tagged as ventilation)
+        stays gone: a UMR200 configured as light (group 1) or plain Joker
+        (group 8 only, no 64) is still excluded.
         """
         out = []
         for dsuid, dev in self.devices.items():
@@ -1957,9 +1963,11 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 continue
             if int(dev.get("output_mode", 0) or 0) <= 0:
                 continue
-            in_vent_group = GROUP_VENTILATION in dev.get("groups", [])
+            groups = dev.get("groups", [])
+            in_vent_group = GROUP_VENTILATION in groups
+            in_home_vent_group = GROUP_HOME_VENTILATION in groups
             whitelisted = dsuid.lower() in self.extra_ventilation_dsuids
-            if not (in_vent_group or whitelisted):
+            if not (in_vent_group or in_home_vent_group or whitelisted):
                 continue
             out.append(dev)
         return out

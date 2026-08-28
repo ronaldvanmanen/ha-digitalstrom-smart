@@ -37,6 +37,14 @@ GROUP_COOLING = 9
 GROUP_VENTILATION = 10
 GROUP_WINDOW = 11
 GROUP_TEMP_CONTROL = 48
+# "Woningventilatie" (apartment/home ventilation). René (DS expert, 28 aug 2026,
+# bevestigd): de dSS kent groep 64 AUTOMATISCH toe zodra een SW-UMR200-poort in
+# de configurator op de blauwe Woningventilatie-functie wordt gezet. Zo'n uitgang
+# rapporteert in zijn device-groups géén GROUP_VENTILATION (10) maar wél 64 (naast
+# Joker 8) — zie de beta40 SEED-DIAG (groups=[8, 64]). Groep 64 is dus de
+# betrouwbare automatische marker voor een woningventilatie-uitgang en vervangt de
+# handmatige opt-in whitelist (die als vangnet blijft bestaan, leeg by default).
+GROUP_HOME_VENTILATION = 64
 
 GROUP_NAMES = {
     GROUP_LIGHT: "Light",
@@ -51,6 +59,7 @@ GROUP_NAMES = {
     GROUP_VENTILATION: "Ventilation",
     GROUP_WINDOW: "Window",
     GROUP_TEMP_CONTROL: "Temperature Control",
+    GROUP_HOME_VENTILATION: "Home Ventilation",
 }
 
 # Groups that may legitimately be configured at ZONE level without a physical
