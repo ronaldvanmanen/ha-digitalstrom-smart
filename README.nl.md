@@ -247,17 +247,9 @@ Home Assistant gebruikt automatisch de juiste taal op basis van je systeemtaal. 
 
 ## Wijzigingslog
 
-<<<<<<< HEAD
-### v4.2.0 (24-08-2026) — Betrouwbare Joker-actor-status (SW-KL) & schakelbare gebruikersstatussen
-
-- **Joker-actoren die óók een ingang hebben (bijv. SW-KL / KL200) tonen nu de juiste aan/uit-status.** Voorheen deelden de relais-uitgang en de binaire ingang één status-slot, waardoor de status vlak na het opstarten fout kon zijn of na een dSS-herstart kon omklappen. Uitgang en ingang zitten nu in aparte status-slots, de uitgangsstand wordt bij (her)start bevestigd via `getOutputValue`, en een verouderde apparaat-cache overschrijft de live uitgang niet meer. Een runtime-controle corrigeert een valse "aan" alléén als de relais-uitgang echt nul is — geen blinde gok. In het veld bevestigd over meerdere dagen en herstarts.
-- **Gebruikersgedefinieerde (custom) statussen zijn als schakelaar te bedienen.** Schrijfbare custom-statussen verschijnen als schakelaar en worden correct naar de dSS geschreven (op de status-naam, met de `addon`-parameter); alleen-lezen statussen worden niet meer als schakelaar getoond, en een echte dSS-schrijffout wordt zichtbaar gemaakt in plaats van stil te falen.
-- **Schonere logging** — uitgebreide `[DS-DEBUG]`-diagnostiek naar debug-niveau, en de Joker-divergentie-waarschuwing is edge-getriggerd (één keer per episode) in plaats van de log te overspoelen.
-=======
 ### v4.2.0-beta32 — Correcte documentatie van de dSS-belasting
 
 - **Vergelijkingstabel van de "belasting op de dSS" gecorrigeerd.** De oude tabel noemde "~0,4 verzoeken/min", wat de werkelijke waarde onderschatte. Ze onderscheidt nu **dS485-buslezingen** (blijven stil — dát is de belasting die telt voor de meetintegriteit) van **cache-bediende dSS web-API-calls** (~25-35/min op een draaiende installatie: de 5 s apparaat-poll, de 30 s cyclus en de event long-poll). Alleen documentatie — geen functionele wijziging. Met dank aan René van der Gaag voor het signaleren van de afwijking t.o.v. zijn live installatie.
->>>>>>> feat/vent-auto-group64
 
 ### v4.1.4 (25-06-2026) — Regelwaarde-sensor (koel-/verwarmvraag uit de DS)
 

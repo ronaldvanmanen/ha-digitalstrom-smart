@@ -239,17 +239,9 @@ Home Assistant verwendet automatisch die richtige Sprache basierend auf Ihrer Sy
 
 ## Änderungsprotokoll
 
-<<<<<<< HEAD
-### v4.2.0 (24.08.2026) — Zuverlässiger Joker-Aktor-Status (SW-KL) & schaltbare benutzerdefinierte Zustände
-
-- **Joker-Aktoren, die auch einen Eingang haben (z. B. SW-KL / KL200), zeigen jetzt den korrekten Ein/Aus-Status.** Zuvor teilten sich der Relais-Ausgang und der Binäreingang einen Status-Slot, sodass der Status direkt nach dem Start falsch sein oder nach einem dSS-Neustart umspringen konnte. Ausgang und Eingang werden nun in getrennten Status-Slots geführt, der Ausgangszustand wird beim (Neu-)Start über `getOutputValue` bestätigt, und ein veralteter Geräte-Cache überschreibt den Live-Ausgang nicht mehr. Eine Laufzeitprüfung korrigiert ein falsches „Ein" nur, wenn der Relais-Ausgang tatsächlich null ist — kein blindes Raten. Im Feld über mehrere Tage und Neustarts bestätigt.
-- **Benutzerdefinierte (Custom-)Zustände lassen sich als Schalter steuern.** Schreibbare Custom-Zustände werden als Schalter angezeigt und korrekt an den dSS geschrieben (über den Zustandsnamen, mit dem `addon`-Parameter); schreibgeschützte Zustände werden nicht mehr als Schalter angezeigt, und ein echter dSS-Schreibfehler wird sichtbar gemacht, statt still zu scheitern.
-- **Sauberere Logs** — ausführliche `[DS-DEBUG]`-Diagnostik auf Debug-Ebene, und die Joker-Divergenz-Warnung wird flankengesteuert (einmal pro Episode) ausgegeben, statt das Log zu überfluten.
-=======
 ### v4.2.0-beta32 — Korrekte Dokumentation der dSS-Last
 
 - **Vergleichstabelle der „Last auf dem dSS" korrigiert.** Die alte Tabelle nannte „~0,4 Anfragen/Min" und untertrieb damit den realen Wert. Sie unterscheidet nun **dS485-Bus-Lesezugriffe** (bleiben im Leerlauf — das ist die für die Metering-Integrität entscheidende Last) von **cache-bedienten dSS-Web-API-Aufrufen** (~25-35/Min auf einer laufenden Installation: der 5-s-Geräte-Poll, der 30-s-Zyklus und der Event-Long-Poll). Nur Dokumentation — keine funktionale Änderung. Dank an René van der Gaag für den Hinweis auf die Abweichung gegenüber seiner Live-Installation.
->>>>>>> feat/vent-auto-group64
 
 ### v4.1.4 (25.06.2026) — Regelwert-Sensor (Kühl-/Heizanforderung aus dem DS)
 
