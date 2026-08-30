@@ -53,6 +53,8 @@ Unlike traditional per-device polling integrations, Digital Strom Smart uses the
 Unlock advanced features with a Pro license key from [wooniot.nl/pro](https://wooniot.nl/pro):
 
 - **Climate control** — target temperature, preset modes (Comfort, Economy, Night, Holiday), heating + cooling detection
+- **Joker actuator switches (SW-KL and other SW-* actuators)** — individual on/off control per Joker actuator, with reliable output status after a restart (live per-device query)
+- **Home ventilation (SW-UMR200)** — automatic detection of ventilation units on dS group 64, with on/off status and level (%) per output, and control
 - **Presence mode** — read and set the apartment presence state (Present, Absent, Sleeping, …) as a select entity
 - **User Defined Actions** — actions configured in the dSS Configurator appear as Home Assistant **buttons**
 - **User Defined States** — custom and apartment-wide dSS states appear as **sensors / binary sensors** with live updates from `stateChange` events

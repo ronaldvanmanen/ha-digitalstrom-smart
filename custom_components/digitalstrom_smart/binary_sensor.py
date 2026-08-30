@@ -156,12 +156,12 @@ async def async_setup_entry(
             DigitalStromDeviceOutputStatus(coordinator, dsuid, dev)
         )
 
-    # --- FREE: SW-UMR200 ventilation status per output (read-only) ---
+    # --- PRO: SW-UMR200 ventilation status per output (read-only; Pro-only, advies René) ---
     # A UMR200 always has 2 outputs; each may drive a ventilation unit. Status
     # is ON when the output level exceeds 10% (a stationary ~5% rest level reads
     # as OFF), matching René's threshold. The exact percentage is an attribute
     # and also a separate percentage sensor (sensor.py).
-    for dev in coordinator.get_umr200_devices():
+    for dev in (coordinator.get_umr200_devices() if coordinator.pro_enabled else []):
         zone_id = dev.get("zone_id")
         if enabled_zones and zone_id not in enabled_zones:
             continue

@@ -289,10 +289,10 @@ async def async_setup_entry(
     # Configurator timers/klokken are exposed as switch entities only
     # (one entity per timer to avoid duplicated sensor+switch pairs).
 
-    # --- FREE: SW-UMR200 ventilation level (%) per output ---
+    # --- PRO: SW-UMR200 ventilation level (%) per output (Pro-only, advies René) ---
     # The raw relay level (0..255) as a 0-100% value, so a dashboard can show
     # the actual ventilation level next to the on/off status (binary_sensor).
-    for dev in coordinator.get_umr200_devices():
+    for dev in (coordinator.get_umr200_devices() if coordinator.pro_enabled else []):
         zone_id = dev.get("zone_id")
         if enabled_zones and zone_id not in enabled_zones:
             continue
