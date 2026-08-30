@@ -51,11 +51,17 @@
         "data": {
           "enabled_zones": "Aktivierte Zonen",
           "invert_cover_position": "Abdeckungsrichtung umkehren",
-          "pro_license_key": "Pro-Lizenzschlüssel"
+          "pro_license_key": "Pro-Lizenzschlüssel",
+          "main_poll_interval": "Abfrageintervall (Sekunden)",
+          "binary_poll_interval": "Fallback-Abfrage Kontakt/Bewegung (Sekunden)",
+          "extra_ventilation_dsuids": "Zusätzliche Lüftungs-UMR200-dsuids (erweitert)"
         },
         "data_description": {
           "invert_cover_position": "Aktivieren Sie dies, wenn sich Ihre Jalousien/Rollläden in die falsche Richtung bewegen (Öffnen/Schließen vertauscht)",
-          "pro_license_key": "Schalten Sie Klimasteuerung, Energie-Dashboard, Außensensoren, Geräteidentifikation und mehr frei. Holen Sie sich Ihren Schlüssel auf wooniot.nl/pro"
+          "pro_license_key": "Schalten Sie Klimasteuerung, Energie-Dashboard, Außensensoren, Geräteidentifikation und mehr frei. Holen Sie sich Ihren Schlüssel auf wooniot.nl/pro",
+          "main_poll_interval": "Wie oft Sensor-, Energie- und Statusdaten vom dSS gelesen werden. Höher = weniger Last auf dem dSS-Server. Standard 30s (Bereich 15–300).",
+          "binary_poll_interval": "Fallback-Abfrage für Kontakt-/Bewegungs-/Türsensoren. Diese werden bereits in Echtzeit über Events aktualisiert; diese Abfrage ist nur ein Sicherheitsnetz für verpasste Events. Höher = weniger Last. Standard 30s (Bereich 15–300).",
+          "extra_ventilation_dsuids": "Kommagetrennte dsuids von UMR200-Ausgängen, die eine Lüftungseinheit ansteuern, aber AUSSERHALB der dS-Farbgruppe Ventilation konfiguriert sind (z. B. als Joker/schwarz). Leer lassen, sofern nicht einem Lüftungsausgang wegen seiner dS-Farbgruppe die Lüftungsstatus-/-stufen-Entitäten fehlen. Erweitert — nur bei bekannter dsuid ändern."
         }
       }
     }
@@ -133,6 +139,12 @@
       },
       "license_status": {
         "name": "Lizenzstatus"
+      },
+      "active_scene_light": {
+        "name": "Aktive Lichtszene"
+      },
+      "active_scene_shade": {
+        "name": "Aktive Beschattungsszene"
       }
     },
     "light": {
@@ -303,116 +315,50 @@
       "light_area1_off": {
         "name": "Licht Bereich 1 Aus"
       },
-      "light_area1_scene_1": {
-        "name": "Licht Bereich 1 Szene 1"
-      },
-      "light_area1_scene_2": {
-        "name": "Licht Bereich 1 Szene 2"
-      },
-      "light_area1_scene_3": {
-        "name": "Licht Bereich 1 Szene 3"
+      "light_area1_on": {
+        "name": "Licht Bereich 1 Ein"
       },
       "shade_area1_off": {
         "name": "Beschattung Bereich 1 Aus"
       },
-      "shade_area1_scene_1": {
-        "name": "Beschattung Bereich 1 Szene 1"
-      },
-      "shade_area1_scene_2": {
-        "name": "Beschattung Bereich 1 Szene 2"
-      },
-      "shade_area1_scene_3": {
-        "name": "Beschattung Bereich 1 Szene 3"
+      "shade_area1_on": {
+        "name": "Beschattung Bereich 1 Ein"
       },
       "light_area2_off": {
         "name": "Licht Bereich 2 Aus"
       },
-      "light_area2_scene_1": {
-        "name": "Licht Bereich 2 Szene 1"
-      },
-      "light_area2_scene_2": {
-        "name": "Licht Bereich 2 Szene 2"
-      },
-      "light_area2_scene_3": {
-        "name": "Licht Bereich 2 Szene 3"
-      },
-      "light_area2_scene_4": {
-        "name": "Licht Bereich 2 Szene 4"
+      "light_area2_on": {
+        "name": "Licht Bereich 2 Ein"
       },
       "shade_area2_off": {
         "name": "Beschattung Bereich 2 Aus"
       },
-      "shade_area2_scene_1": {
-        "name": "Beschattung Bereich 2 Szene 1"
-      },
-      "shade_area2_scene_2": {
-        "name": "Beschattung Bereich 2 Szene 2"
-      },
-      "shade_area2_scene_3": {
-        "name": "Beschattung Bereich 2 Szene 3"
-      },
-      "shade_area2_scene_4": {
-        "name": "Beschattung Bereich 2 Szene 4"
+      "shade_area2_on": {
+        "name": "Beschattung Bereich 2 Ein"
       },
       "light_area3_off": {
         "name": "Licht Bereich 3 Aus"
       },
-      "light_area3_scene_1": {
-        "name": "Licht Bereich 3 Szene 1"
-      },
-      "light_area3_scene_2": {
-        "name": "Licht Bereich 3 Szene 2"
-      },
-      "light_area3_scene_3": {
-        "name": "Licht Bereich 3 Szene 3"
-      },
-      "light_area3_scene_4": {
-        "name": "Licht Bereich 3 Szene 4"
+      "light_area3_on": {
+        "name": "Licht Bereich 3 Ein"
       },
       "shade_area3_off": {
         "name": "Beschattung Bereich 3 Aus"
       },
-      "shade_area3_scene_1": {
-        "name": "Beschattung Bereich 3 Szene 1"
-      },
-      "shade_area3_scene_2": {
-        "name": "Beschattung Bereich 3 Szene 2"
-      },
-      "shade_area3_scene_3": {
-        "name": "Beschattung Bereich 3 Szene 3"
-      },
-      "shade_area3_scene_4": {
-        "name": "Beschattung Bereich 3 Szene 4"
+      "shade_area3_on": {
+        "name": "Beschattung Bereich 3 Ein"
       },
       "light_area4_off": {
         "name": "Licht Bereich 4 Aus"
       },
-      "light_area4_scene_1": {
-        "name": "Licht Bereich 4 Szene 1"
-      },
-      "light_area4_scene_2": {
-        "name": "Licht Bereich 4 Szene 2"
-      },
-      "light_area4_scene_3": {
-        "name": "Licht Bereich 4 Szene 3"
-      },
-      "light_area4_scene_4": {
-        "name": "Licht Bereich 4 Szene 4"
+      "light_area4_on": {
+        "name": "Licht Bereich 4 Ein"
       },
       "shade_area4_off": {
         "name": "Beschattung Bereich 4 Aus"
       },
-      "shade_area4_scene_1": {
-        "name": "Beschattung Bereich 4 Szene 1"
-      },
-      "shade_area4_scene_2": {
-        "name": "Beschattung Bereich 4 Szene 2"
-      },
-      "shade_area4_scene_3": {
-        "name": "Beschattung Bereich 4 Szene 3"
-      },
-      "shade_area4_scene_4": {
-        "name": "Beschattung Bereich 4 Szene 4"
+      "shade_area4_on": {
+        "name": "Beschattung Bereich 4 Ein"
       }
     }
   },

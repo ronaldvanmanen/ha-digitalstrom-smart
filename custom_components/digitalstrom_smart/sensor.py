@@ -46,9 +46,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     DOMAIN, MANUFACTURER, CONF_ENABLED_ZONES, GROUP_TEMP_CONTROL,
+    GROUP_LIGHT, GROUP_SHADE,
     SENSOR_TEMPERATURE, SENSOR_HUMIDITY, SENSOR_BRIGHTNESS, SENSOR_CO2,
     SENSOR_ACTIVE_POWER, SENSOR_ACTIVE_ENERGY,
     OUTDOOR_SENSOR_TRANSLATION_KEYS, DEVICE_SENSOR_TRANSLATION_KEYS,
+    VENTILATION_OUTPUT_OFFSETS,
 )
 from .coordinator import DigitalStromCoordinator
 
@@ -165,6 +167,24 @@ async def async_setup_entry(
         if enabled_zones and zone_id not in enabled_zones:
             continue
 
+        # --- FREE: Active-scene sensors (light + shade) ---
+        # Shows which dS scene is currently active in the zone (e.g. "Scene 1",
+        # "All off", a user-named scene). The scene state is already tracked by
+        # the coordinator from callScene events + getLastCalledScene.
+        zone_groups = zone_info.get("groups", [])
+        if GROUP_LIGHT in zone_groups:
+            entities.append(
+                DigitalStromActiveSceneSensor(
+                    coordinator, zone_id, zone_info, GROUP_LIGHT
+                )
+            )
+        if GROUP_SHADE in zone_groups:
+            entities.append(
+                DigitalStromActiveSceneSensor(
+                    coordinator, zone_id, zone_info, GROUP_SHADE
+                )
+            )
+
         if coordinator.has_temp_control(zone_id):
             # Zone with temperature control: current + target temp + heating output
             if coordinator.get_current_temperature(zone_id) is not None:
@@ -269,6 +289,27 @@ async def async_setup_entry(
     # Configurator timers/klokken are exposed as switch entities only
     # (one entity per timer to avoid duplicated sensor+switch pairs).
 
+    # --- PRO: SW-UMR200 ventilation level (%) per output (Pro-only, advies René) ---
+    # The raw relay level (0..255) as a 0-100% value, so a dashboard can show
+    # the actual ventilation level next to the on/off status (binary_sensor).
+    for dev in (coordinator.get_umr200_devices() if coordinator.pro_enabled else []):
+        zone_id = dev.get("zone_id")
+        if enabled_zones and zone_id not in enabled_zones:
+            continue
+        for offset in VENTILATION_OUTPUT_OFFSETS:
+            # Only expose an output the dSS actually reported a level for; skip
+            # an unused second output that returns no value (René, 28 aug 2026).
+            if coordinator.get_ventilation_output(dev["dsuid"], offset) is None:
+                _LOGGER.debug(
+                    "UMR200 %s (%s): geen output op offset=%d bij seed-poll — "
+                    "sla ventilatieniveau-entiteit voor deze uitgang over",
+                    dev["dsuid"][:12], dev.get("name", ""), offset,
+                )
+                continue
+            entities.append(
+                DigitalStromVentilationLevel(coordinator, dev, offset)
+            )
+
     async_add_entities(entities)
 
 
@@ -350,6 +391,63 @@ class DigitalStromLicenseSensor(CoordinatorEntity, SensorEntity):
             "dss_id_sent": info.get("dss_id_sent", ""),
         }
         return attrs
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
+
+class DigitalStromActiveSceneSensor(CoordinatorEntity, SensorEntity):
+    """Shows which dS scene is currently active in a zone (light or shade).
+
+    The dSS keeps the last-called scene per zone/group; the coordinator tracks
+    it from callScene events and getLastCalledScene. This sensor surfaces that
+    as a readable name (e.g. "Scene 1", "All off", or a user-named scene), so a
+    user can see the physical scene state next to the on/off state (René, #idea).
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:movie-open-play"
+
+    def __init__(
+        self,
+        coordinator: DigitalStromCoordinator,
+        zone_id: int,
+        zone_info: dict,
+        group: int,
+    ) -> None:
+        super().__init__(coordinator)
+        self._zone_id = zone_id
+        self._group = group
+        dss_id = coordinator.dss_id
+        gkey = "light" if group == GROUP_LIGHT else "shade"
+        self._attr_unique_id = f"ds_{dss_id}_{zone_id}_active_scene_{gkey}"
+        self._attr_translation_key = f"active_scene_{gkey}"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{dss_id}_zone_{zone_id}")},
+            "name": zone_info["name"],
+            "manufacturer": MANUFACTURER,
+            "model": "Zone",
+            "suggested_area": zone_info["name"],
+        }
+
+    @property
+    def native_value(self) -> str | None:
+        state = self.coordinator.get_zone_state(self._zone_id, self._group)
+        scene = state.get("scene")
+        if scene is None:
+            return None
+        return self.coordinator.get_scene_display_name(
+            self._zone_id, self._group, scene
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        state = self.coordinator.get_zone_state(self._zone_id, self._group)
+        return {
+            "scene_number": state.get("scene"),
+            "is_on": state.get("is_on"),
+        }
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -800,6 +898,61 @@ class DigitalStromUserStateSensor(CoordinatorEntity, SensorEntity):
             return str(state)
         value = data.get("value")
         return str(value) if value is not None else None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
+
+class DigitalStromVentilationLevel(CoordinatorEntity, SensorEntity):
+    """Ventilation output level (%) for one SW-UMR200 output.
+
+    The raw relay level (getOutputValue, 0..255) mapped to 0-100%. Paired with
+    the ventilatiestatus binary_sensor (>10% = on). Read-only. Free.
+    """
+
+    _attr_has_entity_name = True
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_icon = "mdi:fan"
+
+    def __init__(
+        self,
+        coordinator: DigitalStromCoordinator,
+        dev: dict,
+        offset: int,
+    ) -> None:
+        super().__init__(coordinator)
+        self._dsuid = dev["dsuid"]
+        self._offset = offset
+        dss_id = coordinator.dss_id
+        zone_id = dev.get("zone_id", 0)
+        dev_name = dev.get("name") or self._dsuid[:8]
+        self._attr_unique_id = f"ds_{dss_id}_dev_{self._dsuid}_ventlevel_{offset}"
+        self._attr_name = f"{dev_name} ventilatieniveau uitgang {offset + 1}"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{dss_id}_zone_{zone_id}")},
+            "name": dev.get("zone_name", ""),
+            "manufacturer": MANUFACTURER,
+            "model": "Zone",
+            "suggested_area": dev.get("zone_name", ""),
+        }
+
+    @property
+    def native_value(self) -> int | None:
+        data = self.coordinator.get_ventilation_output(self._dsuid, self._offset)
+        if not data:
+            return None
+        return data.get("pct")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        data = self.coordinator.get_ventilation_output(self._dsuid, self._offset) or {}
+        return {
+            "raw_output": data.get("raw"),
+            "output": self._offset + 1,
+            "dsuid": self._dsuid,
+        }
 
     @callback
     def _handle_coordinator_update(self) -> None:

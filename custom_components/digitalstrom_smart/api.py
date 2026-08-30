@@ -463,11 +463,17 @@ class DigitalStromApi:
     # Zone commands (scenes, values, dimming)
     # =====================================================================
 
-    async def call_scene(self, zone_id: int, group: int, scene_number: int) -> None:
-        await self._request(
-            "/json/zone/callScene",
-            {"id": zone_id, "groupID": group, "sceneNumber": scene_number},
-        )
+    async def call_scene(
+        self, zone_id: int, group: int, scene_number: int, force: bool = False
+    ) -> None:
+        # force=true enables dS local-priority override: a device switched
+        # locally (wall button) sets local priority and then ignores plain zone
+        # scene calls; the forced call overrides that. Default False keeps
+        # existing behaviour unchanged (GitHub #34).
+        params = {"id": zone_id, "groupID": group, "sceneNumber": scene_number}
+        if force:
+            params["force"] = "true"
+        await self._request("/json/zone/callScene", params)
 
     async def undo_scene(self, zone_id: int, group: int, scene_number: int) -> None:
         await self._request(
@@ -997,6 +1003,7 @@ class DigitalStromApi:
         event_names = [
             "callScene",
             "undoScene",
+            "buttonClick",
             "zoneSensorValue",
             "stateChange",
             "addonStateChange",   # user-defined states (system-addon-user-defined-states)

@@ -139,6 +139,29 @@ class DigitalStromClimate(CoordinatorEntity, ClimateEntity):
         return self.coordinator.get_current_temperature(self._zone_id)
 
     @property
+    def current_humidity(self) -> float | None:
+        """Relatieve luchtvochtigheid van de zone-thermostaat (bv. FTW06), indien gemeten.
+
+        Verzoek Niels Hogendoorn (30 aug 2026): toon de vochtigheid direct in de
+        climate-entiteit i.p.v. alleen als losse sensor. Valt netjes terug op None
+        als de thermostaat/zone geen vochtigheid rapporteert."""
+        status = self.coordinator.get_climate_status(self._zone_id)
+        if status:
+            h = status.get("HumidityValue")
+            if h and h > 0:
+                return round(float(h))
+        zs = self.coordinator.get_zone_sensor(self._zone_id) or {}
+        h = zs.get("HumidityValue")
+        if not h and isinstance(zs.get("values"), list):
+            for v in zs["values"]:
+                if isinstance(v, dict) and v.get("HumidityValue") is not None:
+                    h = v["HumidityValue"]
+                    break
+        if h and h > 0:
+            return round(float(h))
+        return None
+
+    @property
     def target_temperature(self) -> float | None:
         status = self.coordinator.get_climate_status(self._zone_id)
         if status:

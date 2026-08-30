@@ -16,7 +16,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, MANUFACTURER, GROUP_JOKER, CONF_ENABLED_ZONES, APARTMENT_WEATHER_SCENES, WEATHER_TRANSLATION_KEYS, SCENE_RAIN, APARTMENT_ALARM_SCENES, ALARM_BINARY_SENSOR_KEYS, SCENE_FIRE, SCENE_DOOR_BELL, APARTMENT_SYSTEM_STATES, APARTMENT_ENV_STATES
+from .const import DOMAIN, MANUFACTURER, GROUP_JOKER, GROUP_HEATING, GROUP_VENTILATION, GROUP_COOLING, GROUP_NAMES, CONF_ENABLED_ZONES, APARTMENT_WEATHER_SCENES, WEATHER_TRANSLATION_KEYS, SCENE_RAIN, APARTMENT_ALARM_SCENES, ALARM_BINARY_SENSOR_KEYS, SCENE_FIRE, SCENE_DOOR_BELL, APARTMENT_SYSTEM_STATES, APARTMENT_ENV_STATES, VENTILATION_ON_THRESHOLD_PCT, VENTILATION_OUTPUT_OFFSETS
 from .coordinator import DigitalStromCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -155,6 +155,31 @@ async def async_setup_entry(
         entities.append(
             DigitalStromDeviceOutputStatus(coordinator, dsuid, dev)
         )
+
+    # --- PRO: SW-UMR200 ventilation status per output (read-only; Pro-only, advies René) ---
+    # A UMR200 always has 2 outputs; each may drive a ventilation unit. Status
+    # is ON when the output level exceeds 10% (a stationary ~5% rest level reads
+    # as OFF), matching René's threshold. The exact percentage is an attribute
+    # and also a separate percentage sensor (sensor.py).
+    for dev in (coordinator.get_umr200_devices() if coordinator.pro_enabled else []):
+        zone_id = dev.get("zone_id")
+        if enabled_zones and zone_id not in enabled_zones:
+            continue
+        for offset in VENTILATION_OUTPUT_OFFSETS:
+            # Only expose an output the dSS actually reported a level for. A
+            # UMR200 may use just one of its two outputs; the unused offset
+            # returns no value (René: 'ventilatieniveau uitgang 2 bestaat niet')
+            # → skip it instead of creating a phantom entity without value.
+            if coordinator.get_ventilation_output(dev["dsuid"], offset) is None:
+                _LOGGER.debug(
+                    "UMR200 %s (%s): geen output op offset=%d bij seed-poll — "
+                    "sla ventilatiestatus-entiteit voor deze uitgang over",
+                    dev["dsuid"][:12], dev.get("name", ""), offset,
+                )
+                continue
+            entities.append(
+                DigitalStromVentilationStatus(coordinator, dev, offset)
+            )
 
     async_add_entities(entities)
 
@@ -657,6 +682,80 @@ class DigitalStromRainSensor(CoordinatorEntity, BinarySensorEntity):
         if value is not None:
             return float(value) > 0
         return None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
+
+class DigitalStromVentilationStatus(CoordinatorEntity, BinarySensorEntity):
+    """Read-only ventilation status for one SW-UMR200 output.
+
+    A UMR200 always has 2 outputs (offset 0 and 1). Each output level is read
+    directly from the relay (getOutputValue, 0..255). The status is ON when the
+    level exceeds 10% and OFF at 10% or below, so a stationary ~5% rest level
+    reads as OFF — the plain "output > 0 = on" actor logic would wrongly show
+    ON. Threshold and behaviour confirmed with René (27 aug 2026).
+
+    device_class RUNNING → HA shows "Running"/"Not running". The exact level is
+    exposed as the ``level_percent`` attribute (and as a separate % sensor).
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.RUNNING
+    _attr_icon = "mdi:fan"
+
+    def __init__(
+        self,
+        coordinator: DigitalStromCoordinator,
+        dev: dict,
+        offset: int,
+    ) -> None:
+        super().__init__(coordinator)
+        self._dsuid = dev["dsuid"]
+        self._offset = offset
+        dss_id = coordinator.dss_id
+        zone_id = dev.get("zone_id", 0)
+        dev_name = dev.get("name") or self._dsuid[:8]
+        # UMR200 has 2 outputs → number them 1/2 for the user.
+        self._attr_unique_id = f"ds_{dss_id}_dev_{self._dsuid}_vent_{offset}"
+        self._attr_name = f"{dev_name} ventilatiestatus uitgang {offset + 1}"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{dss_id}_zone_{zone_id}")},
+            "name": dev.get("zone_name", ""),
+            "manufacturer": MANUFACTURER,
+            "model": "Zone",
+            "suggested_area": dev.get("zone_name", ""),
+        }
+
+    @property
+    def is_on(self) -> bool | None:
+        data = self.coordinator.get_ventilation_output(self._dsuid, self._offset)
+        if not data:
+            return None
+        return data.get("pct", 0) > VENTILATION_ON_THRESHOLD_PCT
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        data = self.coordinator.get_ventilation_output(self._dsuid, self._offset) or {}
+        dev = self.coordinator.devices.get(self._dsuid, {})
+        groups = dev.get("groups", [])
+        # Which dS colour group is this UMR200 assigned to? Blue = climate
+        # (heating/cooling), Ventilation = its own group, else Joker/black.
+        if GROUP_HEATING in groups or GROUP_COOLING in groups:
+            colour = "blauw (klimaat)"
+        elif GROUP_VENTILATION in groups:
+            colour = GROUP_NAMES.get(GROUP_VENTILATION, "Ventilation")
+        else:
+            colour = "zwart (Joker)"
+        return {
+            "level_percent": data.get("pct"),
+            "raw_output": data.get("raw"),
+            "output": self._offset + 1,
+            "threshold_percent": VENTILATION_ON_THRESHOLD_PCT,
+            "config_group": colour,
+            "dsuid": self._dsuid,
+        }
 
     @callback
     def _handle_coordinator_update(self) -> None:

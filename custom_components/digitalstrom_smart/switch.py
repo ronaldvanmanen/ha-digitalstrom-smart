@@ -36,7 +36,8 @@ async def async_setup_entry(
 
         # Create individual switch per Joker ACTUATOR in this zone
         # (sensors like contacts and smoke detectors go to binary_sensor)
-        joker_devices = coordinator.get_joker_actuators_in_zone(zone_id)
+        # SW-KL/joker-actor-switches (incl. UMR200-ventilatiesturing) = Pro-only (advies René)
+        joker_devices = coordinator.get_joker_actuators_in_zone(zone_id) if coordinator.pro_enabled else []
         for dev in joker_devices:
             entities.append(
                 DigitalStromJokerSwitch(coordinator, zone_id, zone_info, dev)

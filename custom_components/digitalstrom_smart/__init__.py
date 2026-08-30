@@ -25,16 +25,41 @@ from .const import (
     CONF_DSS_ID,
     CONF_ENABLED_ZONES,
     CONF_PRO_LICENSE,
+    CONF_MAIN_POLL_INTERVAL,
+    CONF_BINARY_POLL_INTERVAL,
+    CONF_EXTRA_VENTILATION_DSUIDS,
+    DEFAULT_MAIN_POLL_INTERVAL,
+    DEFAULT_BINARY_POLL_INTERVAL,
+    MIN_POLL_INTERVAL,
+    MAX_POLL_INTERVAL,
 )
 from .coordinator import DigitalStromCoordinator
 from .license import check_pro_license as _check_pro_license, sync_pro_issue
 
 # Pre-import all platform modules to avoid blocking imports in event loop (HA 2026+)
 from . import (  # noqa: F401
-    light, cover, sensor, scene, switch, climate, binary_sensor, select, button,
+    light, cover, sensor, scene, switch, climate, binary_sensor, select, button, event,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _clamp_interval(value) -> int:
+    """Clamp a user-supplied poll interval to the safe range.
+
+    A malformed or out-of-range option must never brick setup or hammer the
+    dSS; fall back to the default and keep it within [MIN, MAX].
+    """
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_MAIN_POLL_INTERVAL
+    return max(MIN_POLL_INTERVAL, min(MAX_POLL_INTERVAL, seconds))
+
+
+async def _async_reload_on_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the config entry after its options were updated."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -102,9 +127,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 data={**entry.data, CONF_ENABLED_ZONES: enabled_zones + new_zones},
             )
 
-    # Create coordinator
+    # Create coordinator. Poll intervals are user-tunable (Options flow) so a
+    # large install can throttle the dSS request rate; both are clamped to a
+    # safe range and fall back to the defaults.
     dss_id = entry.data.get(CONF_DSS_ID, "")
-    coordinator = DigitalStromCoordinator(hass, api, structure, dss_id=dss_id)
+    main_interval = _clamp_interval(
+        entry.options.get(CONF_MAIN_POLL_INTERVAL, DEFAULT_MAIN_POLL_INTERVAL)
+    )
+    binary_interval = _clamp_interval(
+        entry.options.get(CONF_BINARY_POLL_INTERVAL, DEFAULT_BINARY_POLL_INTERVAL)
+    )
+    coordinator = DigitalStromCoordinator(
+        hass, api, structure, dss_id=dss_id,
+        main_poll_interval=main_interval,
+        binary_poll_interval=binary_interval,
+    )
+
+    # Opt-in: UMR200 ventilation outputs configured outside the dS Ventilation
+    # colour group (e.g. Joker/black). Parse the CSV option into a lowercased
+    # set so get_umr200_devices() admits them regardless of colour group. Must
+    # be set BEFORE the first refresh so the initial ventilation poll includes
+    # them. Empty by default → strict group gate unchanged.
+    raw_extra = entry.options.get(CONF_EXTRA_VENTILATION_DSUIDS, "") or ""
+    coordinator.extra_ventilation_dsuids = {
+        d.strip().lower() for d in raw_extra.replace("\n", ",").split(",") if d.strip()
+    }
+    if coordinator.extra_ventilation_dsuids:
+        _LOGGER.info(
+            "Extra ventilation UMR200 dsuids (opt-in, outside Ventilation group): %s",
+            ", ".join(sorted(coordinator.extra_ventilation_dsuids)),
+        )
 
     # Check Pro license. Store the key + entry id on the coordinator so it can
     # re-validate periodically (picks up a server-side rebind without a restart).
@@ -232,6 +284,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _shutdown)
     )
 
+    # Reload the entry when options change so a new poll interval takes effect
+    # immediately (no manual HA restart needed).
+    entry.async_on_unload(entry.add_update_listener(_async_reload_on_options))
+
     # Forward to platforms
     platforms = list(PLATFORMS_FREE)
     if coordinator.pro_enabled:
@@ -276,9 +332,10 @@ def _register_services(hass: HomeAssistant) -> None:
         zone_id = call.data["zone_id"]
         group = call.data.get("group", 1)
         scene = call.data["scene_number"]
+        force = call.data.get("force", False)
         for entry_data in hass.data[DOMAIN].values():
             try:
-                await entry_data["api"].call_scene(zone_id, group, scene)
+                await entry_data["api"].call_scene(zone_id, group, scene, force=force)
             except DigitalStromApiError as err:
                 _LOGGER.error("call_scene failed: %s", err)
 

@@ -37,6 +37,14 @@ GROUP_COOLING = 9
 GROUP_VENTILATION = 10
 GROUP_WINDOW = 11
 GROUP_TEMP_CONTROL = 48
+# "Woningventilatie" (apartment/home ventilation). René (DS expert, 28 aug 2026,
+# bevestigd): de dSS kent groep 64 AUTOMATISCH toe zodra een SW-UMR200-poort in
+# de configurator op de blauwe Woningventilatie-functie wordt gezet. Zo'n uitgang
+# rapporteert in zijn device-groups géén GROUP_VENTILATION (10) maar wél 64 (naast
+# Joker 8) — zie de beta40 SEED-DIAG (groups=[8, 64]). Groep 64 is dus de
+# betrouwbare automatische marker voor een woningventilatie-uitgang en vervangt de
+# handmatige opt-in whitelist (die als vangnet blijft bestaan, leeg by default).
+GROUP_HOME_VENTILATION = 64
 
 GROUP_NAMES = {
     GROUP_LIGHT: "Light",
@@ -51,6 +59,21 @@ GROUP_NAMES = {
     GROUP_VENTILATION: "Ventilation",
     GROUP_WINDOW: "Window",
     GROUP_TEMP_CONTROL: "Temperature Control",
+    GROUP_HOME_VENTILATION: "Home Ventilation",
+}
+
+# Groups that may legitimately be configured at ZONE level without a physical
+# device present. Climate/HVAC control on the dSS is zone-based, so heating,
+# cooling, ventilation and temperature-control can exist on a zone that has no
+# dedicated actuator device. All OTHER groups (shade, light, audio, ...) require
+# a real actuator device and must therefore only be derived from device groups —
+# otherwise phantom entities appear in rooms that have no such device (e.g. a
+# cover entity in a room without any blinds/screens). See _parse_structure().
+ZONE_LEVEL_GROUPS = {
+    GROUP_HEATING,
+    GROUP_COOLING,
+    GROUP_VENTILATION,
+    GROUP_TEMP_CONTROL,
 }
 
 # --- dS Scene Numbers ---
@@ -196,54 +219,46 @@ SCENE_COVER_SUN_PROTECT = 11  # Sun protection position
 SCENE_COVER_WIND_PROTECT = 71  # Wind protection (fully open)
 
 # --- dS Area Scene Numbers ---
-# Area 1: scenes 6-9
-SCENE_AREA1_OFF = 6
-SCENE_AREA1_1 = 7
-SCENE_AREA1_2 = 8
-SCENE_AREA1_3 = 9
-
-# Area 2: scenes 10-14
-SCENE_AREA2_OFF = 10
-SCENE_AREA2_1 = 11
-SCENE_AREA2_2 = 12
-SCENE_AREA2_3 = 13
-SCENE_AREA2_4 = 14
-
-# Area 3: scenes 20-24
-SCENE_AREA3_OFF = 20
-SCENE_AREA3_1 = 21
-SCENE_AREA3_2 = 22
-SCENE_AREA3_3 = 23
-SCENE_AREA3_4 = 24
-
-# Area 4: scenes 30-34
-SCENE_AREA4_OFF = 30
-SCENE_AREA4_1 = 31
-SCENE_AREA4_2 = 32
-SCENE_AREA4_3 = 33
-SCENE_AREA4_4 = 34
+# GEVERIFIEERD tegen de officiële dS scene-tabel (openHAB SceneEnum) + velddata
+# (GitHub #26) + melding #35. Elk area heeft precies één OFF- en één ON-scene op
+# zone/groep-niveau:
+#   Area 1: uit = 1, aan = 6 | Area 2: uit = 2, aan = 7
+#   Area 3: uit = 3, aan = 8 | Area 4: uit = 4, aan = 9
+# (scene 0 = hele zone uit, 5 = hele zone aan / preset 1.)
+# Er bestaan GEEN "Area x scene 1/2/3/4" — de vorige nummering (6/10/20/30 als
+# area-off) was fout en gaf verkeerde entity_id's (GitHub #35).
+SCENE_AREA1_OFF = 1
+SCENE_AREA1_ON = 6
+SCENE_AREA2_OFF = 2
+SCENE_AREA2_ON = 7
+SCENE_AREA3_OFF = 3
+SCENE_AREA3_ON = 8
+SCENE_AREA4_OFF = 4
+SCENE_AREA4_ON = 9
 
 # --- dS Area aan/uit-scenes voor zone is_on-detectie ---
-# BEVESTIGD met velddata (Urs Frischknecht, GitHub #26, 28 jun 2026):
-# de fysieke schakelaar stuurt per area een ON- en een OFF-scene:
-#   Area 1 aan = 6, uit = 1 | Area 2 aan = 7, uit = 2
-#   Area 3 aan = 8, uit = 3 | Area 4 aan = 9, uit = 4
-# (scene 0 = hele zone uit, 5 = hele zone aan / preset 1.)
-# LET OP: de SCENE_AREA*-constanten hierboven (6/10/20/30) zijn een ANDERE,
-# foutieve nummering en worden alleen voor scene-NAAMGEVING gebruikt — NOOIT
-# voor aan/uit. Gebruik voor is_on uitsluitend onderstaande maps.
+# BEVESTIGD met velddata (Urs Frischknecht, GitHub #26, 28 jun 2026) en de
+# officiële dS scene-tabel: de fysieke schakelaar stuurt per area een ON- en
+# een OFF-scene. Dit is dezelfde nummering als de SCENE_AREA*-constanten
+# hierboven (nu gelijkgetrokken).
 AREA_ON_SCENES = {6: 1, 7: 2, 8: 3, 9: 4}   # scene -> area-index (area aan)
 AREA_OFF_SCENES = {1: 1, 2: 2, 3: 3, 4: 4}  # scene -> area-index (area uit)
+
+# Extended presets (Preset 10-44) — scene-nummers per dS scene-tabel.
+EXTENDED_PRESET_NAMES = {
+    32: "Preset 10", 33: "Preset 11", 20: "Preset 12", 21: "Preset 13", 22: "Preset 14",
+    34: "Preset 20", 35: "Preset 21", 23: "Preset 22", 24: "Preset 23", 25: "Preset 24",
+    36: "Preset 30", 37: "Preset 31", 26: "Preset 32", 27: "Preset 33", 28: "Preset 34",
+    38: "Preset 40", 39: "Preset 41", 29: "Preset 42", 30: "Preset 43", 31: "Preset 44",
+}
 
 # All zone-level scene numbers that can be user-configured
 # Excludes apartment-wide scenes (65+) which are handled separately
 ALL_ZONE_SCENES = [
     SCENE_OFF, SCENE_1, SCENE_2, SCENE_3, SCENE_4,     # Preset 0-4
-    SCENE_AREA1_OFF, SCENE_AREA1_1, SCENE_AREA1_2, SCENE_AREA1_3,  # Area 1
-    SCENE_AREA2_OFF, SCENE_AREA2_1, SCENE_AREA2_2, SCENE_AREA2_3, SCENE_AREA2_4,  # Area 2
-    SCENE_AREA3_OFF, SCENE_AREA3_1, SCENE_AREA3_2, SCENE_AREA3_3, SCENE_AREA3_4,  # Area 3
-    SCENE_AREA4_OFF, SCENE_AREA4_1, SCENE_AREA4_2, SCENE_AREA4_3, SCENE_AREA4_4,  # Area 4
-    40, 41, 42, 43, 44,  # Preset 10-14 (extended presets)
+    SCENE_AREA1_OFF, SCENE_AREA2_OFF, SCENE_AREA3_OFF, SCENE_AREA4_OFF,  # Area 1-4 uit (1-4)
+    SCENE_AREA1_ON, SCENE_AREA2_ON, SCENE_AREA3_ON, SCENE_AREA4_ON,      # Area 1-4 aan (6-9)
+    *EXTENDED_PRESET_NAMES.keys(),  # Preset 10-44
 ]
 
 # Named scene defaults per group
@@ -255,32 +270,19 @@ NAMED_SCENES = {
     SCENE_4: "Scene 4",
 }
 
-# Default names for area scenes (used when dSS has no custom name)
+# Default names for area/extended scenes (used when dSS has no custom name).
+# Area scenes: elk area heeft één OFF (1-4) en één ON (6-9). GEVERIFIEERD
+# tegen de officiële dS scene-tabel + melding #35.
 AREA_SCENE_NAMES = {
     SCENE_AREA1_OFF: "Area 1 Off",
-    SCENE_AREA1_1: "Area 1 Scene 1",
-    SCENE_AREA1_2: "Area 1 Scene 2",
-    SCENE_AREA1_3: "Area 1 Scene 3",
     SCENE_AREA2_OFF: "Area 2 Off",
-    SCENE_AREA2_1: "Area 2 Scene 1",
-    SCENE_AREA2_2: "Area 2 Scene 2",
-    SCENE_AREA2_3: "Area 2 Scene 3",
-    SCENE_AREA2_4: "Area 2 Scene 4",
     SCENE_AREA3_OFF: "Area 3 Off",
-    SCENE_AREA3_1: "Area 3 Scene 1",
-    SCENE_AREA3_2: "Area 3 Scene 2",
-    SCENE_AREA3_3: "Area 3 Scene 3",
-    SCENE_AREA3_4: "Area 3 Scene 4",
     SCENE_AREA4_OFF: "Area 4 Off",
-    SCENE_AREA4_1: "Area 4 Scene 1",
-    SCENE_AREA4_2: "Area 4 Scene 2",
-    SCENE_AREA4_3: "Area 4 Scene 3",
-    SCENE_AREA4_4: "Area 4 Scene 4",
-    40: "Preset 10",
-    41: "Preset 11",
-    42: "Preset 12",
-    43: "Preset 13",
-    44: "Preset 14",
+    SCENE_AREA1_ON: "Area 1 On",
+    SCENE_AREA2_ON: "Area 2 On",
+    SCENE_AREA3_ON: "Area 3 On",
+    SCENE_AREA4_ON: "Area 4 On",
+    **EXTENDED_PRESET_NAMES,
 }
 
 NAMED_SCENES_SHADE = {
@@ -320,48 +322,27 @@ SCENE_TRANSLATION_KEYS = {
     (GROUP_HEATING, SCENE_2): "heating_economy",
     (GROUP_HEATING, SCENE_3): "heating_night",
     (GROUP_HEATING, SCENE_4): "heating_holiday",
-    # Area 1
+    # Area scenes — elk area heeft één OFF (1-4) en één ON (6-9).
+    # Area 1 (uit=1, aan=6)
     (GROUP_LIGHT, SCENE_AREA1_OFF): "light_area1_off",
-    (GROUP_LIGHT, SCENE_AREA1_1): "light_area1_scene_1",
-    (GROUP_LIGHT, SCENE_AREA1_2): "light_area1_scene_2",
-    (GROUP_LIGHT, SCENE_AREA1_3): "light_area1_scene_3",
+    (GROUP_LIGHT, SCENE_AREA1_ON): "light_area1_on",
     (GROUP_SHADE, SCENE_AREA1_OFF): "shade_area1_off",
-    (GROUP_SHADE, SCENE_AREA1_1): "shade_area1_scene_1",
-    (GROUP_SHADE, SCENE_AREA1_2): "shade_area1_scene_2",
-    (GROUP_SHADE, SCENE_AREA1_3): "shade_area1_scene_3",
-    # Area 2
+    (GROUP_SHADE, SCENE_AREA1_ON): "shade_area1_on",
+    # Area 2 (uit=2, aan=7)
     (GROUP_LIGHT, SCENE_AREA2_OFF): "light_area2_off",
-    (GROUP_LIGHT, SCENE_AREA2_1): "light_area2_scene_1",
-    (GROUP_LIGHT, SCENE_AREA2_2): "light_area2_scene_2",
-    (GROUP_LIGHT, SCENE_AREA2_3): "light_area2_scene_3",
-    (GROUP_LIGHT, SCENE_AREA2_4): "light_area2_scene_4",
+    (GROUP_LIGHT, SCENE_AREA2_ON): "light_area2_on",
     (GROUP_SHADE, SCENE_AREA2_OFF): "shade_area2_off",
-    (GROUP_SHADE, SCENE_AREA2_1): "shade_area2_scene_1",
-    (GROUP_SHADE, SCENE_AREA2_2): "shade_area2_scene_2",
-    (GROUP_SHADE, SCENE_AREA2_3): "shade_area2_scene_3",
-    (GROUP_SHADE, SCENE_AREA2_4): "shade_area2_scene_4",
-    # Area 3
+    (GROUP_SHADE, SCENE_AREA2_ON): "shade_area2_on",
+    # Area 3 (uit=3, aan=8)
     (GROUP_LIGHT, SCENE_AREA3_OFF): "light_area3_off",
-    (GROUP_LIGHT, SCENE_AREA3_1): "light_area3_scene_1",
-    (GROUP_LIGHT, SCENE_AREA3_2): "light_area3_scene_2",
-    (GROUP_LIGHT, SCENE_AREA3_3): "light_area3_scene_3",
-    (GROUP_LIGHT, SCENE_AREA3_4): "light_area3_scene_4",
+    (GROUP_LIGHT, SCENE_AREA3_ON): "light_area3_on",
     (GROUP_SHADE, SCENE_AREA3_OFF): "shade_area3_off",
-    (GROUP_SHADE, SCENE_AREA3_1): "shade_area3_scene_1",
-    (GROUP_SHADE, SCENE_AREA3_2): "shade_area3_scene_2",
-    (GROUP_SHADE, SCENE_AREA3_3): "shade_area3_scene_3",
-    (GROUP_SHADE, SCENE_AREA3_4): "shade_area3_scene_4",
-    # Area 4
+    (GROUP_SHADE, SCENE_AREA3_ON): "shade_area3_on",
+    # Area 4 (uit=4, aan=9)
     (GROUP_LIGHT, SCENE_AREA4_OFF): "light_area4_off",
-    (GROUP_LIGHT, SCENE_AREA4_1): "light_area4_scene_1",
-    (GROUP_LIGHT, SCENE_AREA4_2): "light_area4_scene_2",
-    (GROUP_LIGHT, SCENE_AREA4_3): "light_area4_scene_3",
-    (GROUP_LIGHT, SCENE_AREA4_4): "light_area4_scene_4",
+    (GROUP_LIGHT, SCENE_AREA4_ON): "light_area4_on",
     (GROUP_SHADE, SCENE_AREA4_OFF): "shade_area4_off",
-    (GROUP_SHADE, SCENE_AREA4_1): "shade_area4_scene_1",
-    (GROUP_SHADE, SCENE_AREA4_2): "shade_area4_scene_2",
-    (GROUP_SHADE, SCENE_AREA4_3): "shade_area4_scene_3",
-    (GROUP_SHADE, SCENE_AREA4_4): "shade_area4_scene_4",
+    (GROUP_SHADE, SCENE_AREA4_ON): "shade_area4_on",
 }
 
 # Outdoor sensor key -> translation key
@@ -374,6 +355,23 @@ OUTDOOR_SENSOR_TRANSLATION_KEYS = {
     "airpressure": "air_pressure",
     "rain": "rain_intensity",
 }
+
+# --- Ventilation (SW-UMR200 outputs) ---
+# A SW-UMR200 always has exactly 2 outputs (offset 0 and 1). When an output
+# drives a ventilation unit, its running level is the raw relay output value
+# (getOutputValue, 0..255). René (DS expert, 27 aug 2026): treat >10% as ON,
+# <=10% as OFF, so a stationary ~5% rest level reads as OFF (the plain >0
+# actor logic would wrongly show ON). 10% of 255 = 25.5, so raw > 25 is ON.
+VENTILATION_ON_THRESHOLD_PCT = 10
+VENTILATION_OUTPUT_OFFSETS = (0, 1)
+UMR200_HW_MARKER = "UMR200"
+# René (28 aug 2026): in de praktijk beantwoordt niet elke UMR200-dsuid beide
+# offsets — getOutputValue offset=1 faalt structureel op single-output units
+# met een echte dS485-busfout (DS485d Socket Error -17 invalid parameter),
+# niet een onschuldige cache-miss. Na dit aantal opeenvolgende mislukkingen
+# per dsuid/offset wordt die combinatie voor de rest van de sessie
+# overgeslagen (self-healing bij herstart / structuurwijziging).
+UMR200_OFFSET_FAIL_LIMIT = 3
 
 # --- dS Sensor Types ---
 SENSOR_ACTIVE_POWER = 4    # Watt — SW-KL200, SW-ZWS200, SW-SSL200, SW-UMR200
@@ -442,7 +440,29 @@ CLIMATE_HOLIDAY = 5
 POLL_INTERVAL = 30               # 30s for all sensor data
 POLL_INTERVAL_ENERGY = 30        # kept for backwards compat
 POLL_INTERVAL_TEMPERATURE = 300  # 5 min for temp control values
-POLL_INTERVAL_BINARY = 5         # 5s for binary input states (contacts, doors)
+# Binary-input fallback poll. Motion/contact/door changes already arrive in
+# real time via the stateChange event long-poll (_process_event); this loop is
+# only a reconciliation vangnet for events missed during a reconnect. It runs a
+# FULL apartment/getDevices each cycle, so it is the dominant steady-state dSS
+# request stream — one every 5s was ~17k calls/day and slowed the dSS on larger
+# installs (René, 25 aug 2026). Default relaxed to 30s (matches the main cycle);
+# events keep the fast path instant. User-tunable via the integration options.
+POLL_INTERVAL_BINARY = 30        # fallback reconcile for binary inputs
+
+# Vangnet-cadans voor de twee zwaarste per-cyclus-blokken: de Joker-ACTOR
+# live-confirm (getState + getOutputValue per actor, tot ~2×N calls) en de
+# per-zone climate-status-poll (getTemperatureControlStatus per zone, ~N calls).
+# BEIDE zijn puur vangnet — callScene-/stateChange-events houden switch en
+# klimaatstatus tussendoor live. Ze hoeven dus niet elke 30s-hoofdcyclus mee;
+# 1×/min is ruim voldoende en halveert hun dSS-last op grotere installs
+# (René, 26 aug 2026). Op de default 30s-hoofdpoll valt dit op elke twééde cyclus.
+POLL_INTERVAL_VANGNET = 60       # joker-actor confirm + climate-status vangnet
+
+# Bounds for the user-configurable poll intervals (Options flow).
+MIN_POLL_INTERVAL = 15
+MAX_POLL_INTERVAL = 300
+DEFAULT_MAIN_POLL_INTERVAL = POLL_INTERVAL_ENERGY   # 30s
+DEFAULT_BINARY_POLL_INTERVAL = POLL_INTERVAL_BINARY  # 30s
 
 # --- Event listener ---
 EVENT_POLL_TIMEOUT = 60  # Long-poll timeout for event/get
@@ -464,16 +484,47 @@ CONF_DSS_ID = "dss_id"
 # Options
 CONF_INVERT_COVER = "invert_cover_position"
 CONF_PRO_LICENSE = "pro_license_key"
+CONF_MAIN_POLL_INTERVAL = "main_poll_interval"
+CONF_BINARY_POLL_INTERVAL = "binary_poll_interval"
+# Opt-in whitelist: dsuids of UMR200 outputs that drive a ventilation unit but
+# are configured outside the dS Ventilation colour group (e.g. as Joker/black).
+# These are treated as ventilation outputs regardless of their colour group.
+# CSV of dsuids. Empty by default → strict GROUP_VENTILATION gate stays in force.
+# René (28 aug 2026): his "Overloop Ventilatie" UMR200 outputs are Joker-config.
+CONF_EXTRA_VENTILATION_DSUIDS = "extra_ventilation_dsuids"
 
 # --- Platforms ---
 # Free platforms (always loaded)
-PLATFORMS_FREE = ["light", "cover", "sensor", "scene", "switch", "binary_sensor", "button"]
+PLATFORMS_FREE = ["light", "cover", "sensor", "scene", "switch", "binary_sensor", "button", "event"]
 
 # Pro platforms (requires license)
 PLATFORMS_PRO = ["climate", "select"]
 
 # All platforms
 PLATFORMS = PLATFORMS_FREE + PLATFORMS_PRO
+
+
+# --- Button / rocker press events (event platform) ---
+# dSS functionIDs identifying pushbutton / rocker devices that emit `buttonClick`
+# events. 33030 = EnOcean rocker switch (F6-02-FF). `buttonInputs` is not
+# reliably populated for bridged plan44/EnOcean rockers, so we key off functionID.
+BUTTON_FUNCTION_IDS = {33030}
+
+# dSS clickType -> readable HA event-type suffix.
+BUTTON_CLICK_TYPE_NAMES = {
+    0: "single", 1: "double", 2: "triple", 3: "quadruple",
+    4: "hold", 5: "hold_repeat", 6: "hold_release",
+    7: "single", 8: "double", 9: "triple",
+    10: "short_long", 11: "local_off", 12: "local_on",
+    13: "short_short_long", 14: "local_stop",
+}
+# dSS buttonIndex (buttonElementID) -> readable HA event-type prefix.
+BUTTON_ELEMENT_NAMES = {0: "button", 1: "down", 2: "up"}
+
+
+def signal_button_event(entry_id: str) -> str:
+    """Dispatcher signal carrying a dSS buttonClick for one config entry."""
+    return f"{DOMAIN}_button_event_{entry_id}"
 
 # --- User Defined States ---
 # State source that marks an entry as a true User Defined Action (set in dSS Configurator)

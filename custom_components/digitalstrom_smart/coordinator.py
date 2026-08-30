@@ -11,6 +11,7 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import DigitalStromApi, DigitalStromApiError, DigitalStromAuthError
@@ -19,8 +20,11 @@ import aiohttp
 
 from .const import (
     DOMAIN,
+    BUTTON_FUNCTION_IDS,
+    signal_button_event,
     POLL_INTERVAL_ENERGY,
     POLL_INTERVAL_BINARY,
+    POLL_INTERVAL_VANGNET,
     RECONNECT_INITIAL,
     RECONNECT_MAX,
     GROUP_LIGHT,
@@ -28,7 +32,14 @@ from .const import (
     GROUP_HEATING,
     GROUP_JOKER,
     GROUP_COOLING,
+    GROUP_VENTILATION,
+    GROUP_HOME_VENTILATION,
     GROUP_TEMP_CONTROL,
+    VENTILATION_OUTPUT_OFFSETS,
+    VENTILATION_ON_THRESHOLD_PCT,
+    UMR200_HW_MARKER,
+    UMR200_OFFSET_FAIL_LIMIT,
+    ZONE_LEVEL_GROUPS,
     SCENE_OFF,
     SCENE_1,
     SCENE_2,
@@ -95,17 +106,33 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
     def __init__(
         self, hass: HomeAssistant, api: DigitalStromApi,
         structure: dict, dss_id: str = "",
+        main_poll_interval: int = POLL_INTERVAL_ENERGY,
+        binary_poll_interval: int = POLL_INTERVAL_BINARY,
     ) -> None:
         super().__init__(
             hass, _LOGGER, name=DOMAIN,
-            update_interval=timedelta(seconds=POLL_INTERVAL_ENERGY),
+            update_interval=timedelta(seconds=main_poll_interval),
         )
         self.api = api
         self._structure = structure
         self.dss_id = dss_id
+        # User-tunable dSS request rate (Options flow). The binary fallback poll
+        # is the dominant steady-state load; events keep the fast path instant.
+        self._binary_poll_interval = binary_poll_interval
         self._event_task: asyncio.Task | None = None
         self._binary_poll_task: asyncio.Task | None = None
         self._reconnect_delay = RECONNECT_INITIAL
+
+        # Vangnet-cadans voor de joker-actor live-confirm + climate-status-poll.
+        # Beide zijn alleen vangnet (events houden ze tussendoor live), dus draaien
+        # ze op ~1×/min i.p.v. elke hoofdcyclus. De drempel is het vangnet-interval
+        # minus een halve hoofdcyclus, zodat het op de default 30s-poll robuust op
+        # elke twééde cyclus valt (i.p.v. door scheduler-drift naar 90s te springen).
+        # Nooit trager dan de hoofdcyclus zelf (als de user die > 60s zet).
+        self._vangnet_interval = max(POLL_INTERVAL_VANGNET, main_poll_interval)
+        self._vangnet_due_threshold = self._vangnet_interval - main_poll_interval / 2
+        self._last_joker_confirm: float = 0.0   # throttle joker-actor live-confirm
+        self._last_climate_poll: float = 0.0    # throttle per-zone climate-status
 
         # State tracking: {(zone_id, group): {"scene": int, "value": int, "is_on": bool}}
         self._zone_states: dict[tuple[int, int], dict[str, Any]] = {}
@@ -120,6 +147,11 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         self._temperatures: dict[int, dict] = {}  # zone_id -> temp data
         self._outdoor_sensors: dict = {}  # outdoor weather data
         self._zone_sensors: dict[int, dict] = {}  # zone_id -> sensor readings
+        # True only while THIS poll cycle's apartment getSensorValues succeeded.
+        # Reset at the start of every _async_update_data; lets fetch_device_sensors
+        # map the fresh apartment cache exactly once, and fall back to the per-zone
+        # vangnet loop if the apartment fetch structurally fails (René, 26 aug 2026).
+        self._zone_sensors_fresh: bool = False
 
         # Device sensor values: {dsuid: {sensor_type: value}}
         self._device_sensor_values: dict[str, dict[int, float]] = {}
@@ -144,6 +176,9 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         self._joker_divergence_warned: set[str] = set()
         # Per-device runtime output status from apartment/getDevices: {dsuid: {"on", "is_present", "is_valid"}}
         self._device_runtime: dict[str, dict] = {}
+        # SW-UMR200 ventilation outputs: {dsuid: {offset: {"raw": 0..255, "pct": 0..100}}}
+        # Filled from getOutputValue per output offset — the direct relay read.
+        self._ventilation_outputs: dict[str, dict[int, dict]] = {}
 
         # Metering data
         self._circuit_power: dict[str, int] = {}  # dsuid -> watts
@@ -159,6 +194,33 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         # Configurator timers / "klokken" (system-addon-timed-events)
         # id -> {"name", "last_executed", "enabled", "time_base", "offset", ...}
         self._timed_events: dict[str, dict] = {}
+
+        # dsuids whose raw getStructure entry we already dumped once (beta38
+        # UMR200 group-diagnostic). Must be initialised BEFORE _parse_structure
+        # runs — the diagnostic gate in _parse_structure reads it (beta39 fix:
+        # beta38 crashed on setup with AttributeError because this set was only
+        # created further down, after the parse call).
+        self._umr200_raw_logged: set[str] = set()
+
+        # dsuid/offset pairs whose STARTUP seed trio we already dumped once
+        # (beta40 SEED-DIAG). René (28 aug 2026): a Woningventilatie UMR200 output
+        # shows a wrong INITIAL value right after a restart, then self-corrects.
+        # These outputs are group 8 (Joker) + 64, so they seed from TWO sources at
+        # boot — getState.isOn (the Joker control switch) and getOutputValue (the
+        # ventilation-status sensor). To see which source is wrong at boot without
+        # asking René to enable full debug, log both side by side once per session.
+        self._umr200_seed_logged: set[str] = set()
+
+        # dsuid/offset pairs confirmed to NOT exist on this UMR200 (getOutputValue
+        # keeps returning a dS485 bus error -- "invalid parameter", i.e. that relay
+        # channel is not wired on this module). Single-output UMR200 actors only
+        # populate offset 0; VENTILATION_OUTPUT_OFFSETS unconditionally probes
+        # offset 1 too, so every vangnet cycle (~1x/min) sent a doomed command onto
+        # the live dS485 bus for every such device. After UMR200_OFFSET_FAIL_LIMIT
+        # consecutive failures for the same dsuid/offset we stop asking -- a single
+        # transient dSS hiccup does not blacklist a real offset (René, 28 aug 2026).
+        self._umr200_offset_fail_counts: dict[str, int] = {}
+        self._umr200_bad_offsets: set[str] = set()
 
         # Parse structure into zones and devices
         self.zones: dict[int, dict] = {}
@@ -180,6 +242,14 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         # setpoint zodra het systeem naar koelen schakelt).
         self._temp_control_zones: set[int] = set()
         self._climate_config: dict[int, dict] = {}  # zone_id -> config
+        # Zones met een succesvolle config-call ZONDER actieve klimaatregeling.
+        # Voorkomt dat fetch_climate_data() zulke zones elke vangnet-cyclus
+        # opnieuw bevraagt (getTemperatureControlConfig2) — het antwoord
+        # ('mode': 'off') verandert niet tijdens de levensduur van de
+        # coordinator. Een mislukte call belandt hier NIET in, zodat een
+        # tijdelijke dSS-hapering volgende cyclus gewoon opnieuw wordt
+        # geprobeerd (René, 26 aug 2026).
+        self._climate_config_checked: set[int] = set()
 
         # Apartment-wide state (PRO)
         self._apartment_presence: int | None = None  # current presence scene nr
@@ -200,6 +270,26 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         self.pro_license_key: str = ""
         self.entry_id: str | None = None
         self._license_last_check: float = 0.0
+
+        # Opt-in whitelist of UMR200 output dsuids that drive ventilation but do
+        # NOT surface GROUP_VENTILATION (10) in their device groups array — e.g.
+        # René's Woningventilatie outputs, configured blue/Woningventilatie in
+        # the dSS yet reporting only group 8 in config_group. Set from the
+        # options flow (CONF_EXTRA_VENTILATION_DSUIDS). Empty by default → the
+        # strict GROUP_VENTILATION gate stays in force.
+        self.extra_ventilation_dsuids: set[str] = set()
+
+    def button_devices(self) -> dict[str, dict]:
+        """Devices that emit dSS ``buttonClick`` events (rockers / pushbuttons).
+
+        Identified by dSS ``functionID`` because ``buttonInputs`` is not reliably
+        populated for bridged plan44/EnOcean rocker devices. Keyed by dSUID.
+        """
+        return {
+            dsuid: dev
+            for dsuid, dev in self.devices.items()
+            if dev.get("function_id") in BUTTON_FUNCTION_IDS
+        }
 
     def _parse_structure(self, structure: dict) -> None:
         """Parse apartment structure into zone and device dicts."""
@@ -223,11 +313,16 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     elif isinstance(group_entry, dict):
                         groups.add(group_entry.get("id", 0))
 
-            # Also check zone groups directly (include even without devices,
-            # as climate control can be configured at zone level)
+            # Also check zone groups directly, but ONLY for climate/HVAC groups
+            # (heating/cooling/ventilation/temp-control): those can be configured
+            # at zone level without a dedicated actuator device. Every other group
+            # (shade, light, audio, ...) requires a real device, so it must come
+            # from the device loop above — otherwise the dSS zone-group list adds
+            # e.g. GROUP_SHADE to rooms that have no blinds at all, creating phantom
+            # cover entities (reported by René, rooms zonder raambekleding).
             for zg in zone.get("groups", []):
                 gid = zg.get("group", zg.get("id", 0))
-                if gid:
+                if gid in ZONE_LEVEL_GROUPS:
                     groups.add(gid)
 
             self.zones[zone_id] = {
@@ -251,6 +346,7 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     "hw_info": dev.get("hwInfo", ""),
                     "is_on": dev.get("isOn", False),
                     "output_mode": dev.get("outputMode", 0),
+                    "function_id": dev.get("functionID"),
                     "binary_inputs": dev.get("binaryInputs", []),
                     "groups": [],
                     "sensors": [],
@@ -269,6 +365,28 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                         "value": sensor.get("value"),
                     })
                 self.devices[dsuid] = dev_info
+
+                # beta38 UMR200 group-diagnostic (René, 28 aug 2026): dump the
+                # RAW getStructure entry for every UMR200 once, at INFO, so a
+                # "Woningventilatie" output that does NOT report GROUP_VENTILATION
+                # (10) reveals what the dSS actually returns — the untransformed
+                # groups array (dicts may carry more than id), functionID,
+                # outputMode and any system-function / apartment-level field.
+                # This is the exact data needed to decide between a second group
+                # constant (GROUP_HOME_VENTILATION / Recirculation 12) and reading
+                # the output-channel group elsewhere in the response. One line per
+                # dsuid per session → no log flood.
+                if (UMR200_HW_MARKER in dev_info["hw_info"]
+                        and dsuid not in self._umr200_raw_logged):
+                    self._umr200_raw_logged.add(dsuid)
+                    _LOGGER.info(
+                        "UMR200 RAW-DIAG %s (%s | zone '%s'): "
+                        "raw_groups=%s functionID=%s outputMode=%s all_keys=%s",
+                        dsuid, dev.get("name", ""), zone_name,
+                        dev.get("groups"), dev.get("functionID"),
+                        dev.get("outputMode"), sorted(dev.keys()),
+                    )
+
                 self.zones[zone_id]["devices"].append(dsuid)
 
                 # Initialize device on/off state from structure
@@ -368,6 +486,10 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         # René's SW-KL fout op UIT zette (22 aug 2026).
         await self.fetch_joker_actuator_states(confirm_startup=True)
 
+        # Seed SW-UMR200 ventilation output levels so the entities have a value
+        # immediately (getOutputValue per output offset — the direct relay read).
+        await self.fetch_ventilation_outputs()
+
         # Fetch all dSS /usr/states in one call: fire/rain/alarm + day-night/holiday +
         # motion per zone + malfunction/service. Plus weather-service outdoor + sun.
         await self.fetch_dss_states()
@@ -400,6 +522,22 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         'false' wordt bevestigd. De 30s-hoofdpoll blijft het uiteindelijke vangnet.
         """
         seen: set[str] = set()
+        # Ventilatie-UMR200-uitgangen rusten op ~5% (raw ~13). getState.isOn geeft
+        # voor élk niveau >0 'true', dus de Joker-switch zou bij dat rustniveau AAN
+        # tonen terwijl de ventilatiestatus-sensor (10%-drempel) correct 'Niet actief'
+        # toont — precies de "verkeerde beginwaarde na herstart" die René meldde
+        # (SEED-DIAG beta40, 28 aug 2026: raw=13 pct=5% running=False; joker on_state=true).
+        # Voor deze uitgangen geldt: output op/onder de ventilatiedrempel = fysiek UIT,
+        # zodat switch én sensor met het relais overeenkomen. Commando's blijven gelijk.
+        vent_dsuids = {d.get("dsuid") for d in self.get_umr200_devices() if d.get("dsuid")}
+
+        def _vent_output_is_off(raw: int) -> bool:
+            """True als een ventilatie-uitgang op/onder de drempel (rust) staat."""
+            if raw < 0:
+                return False
+            pct = round(max(0, min(255, raw)) / 255 * 100)
+            return pct <= VENTILATION_ON_THRESHOLD_PCT
+
         # (zone_id, dsuid, dev) waarvan de eerste seed 'false' was en die na settle
         # opnieuw gecheckt moeten worden — alleen relevant bij (her)start.
         pending_confirm: list[tuple[int, str, dict]] = []
@@ -429,10 +567,13 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     # een mislezing (-1) of een echte >0 laat isOn ongemoeid. De seed/startup-tak
                     # (old_on is None) blijft onveranderd.
                     resolved = is_on
-                    if not confirm_startup and old_on is not None and not is_on:
-                        # getState meldt weer 'false': divergentie-episode voorbij,
-                        # WARNING her-bewapenen voor een eventuele volgende episode.
-                        self._joker_divergence_warned.discard(dsuid)
+                    # BEWUST GEEN her-bewapening op een kale isOn=false (René, 28 aug 2026,
+                    # beta34). Een divergente Joker-actor die fysiek UIT blijft laat isOn
+                    # herhaald false->true->false flip-floppen; her-bewapenen op elke 'false'
+                    # gaf dan bij elke volgende 'true' opnieuw een WARNING -> log-flood +
+                    # terugkerende HA-errorbanner (precies wat de edge-trigger wilde vermijden).
+                    # We her-bewapenen daarom UITSLUITEND na een bevestigd fysiek-AAN
+                    # (getOutputValue>0, zie onder): pas dan is de episode echt voorbij.
                     if not confirm_startup and old_on is not None and is_on:
                         run_out_val = -1
                         try:
@@ -441,7 +582,8 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                             _LOGGER.debug(
                                 "Joker-actor runtime getOutputValue faalde %s: %s", dsuid, err
                             )
-                        if run_out_val == 0:
+                        vent_rest = dsuid in vent_dsuids and _vent_output_is_off(run_out_val)
+                        if run_out_val == 0 or vent_rest:
                             resolved = False
                             # Edge-triggered: één WARNING per divergentie-episode. Een
                             # blijvende isOn-leugen corrigeren we elke poll (goed), maar
@@ -449,11 +591,20 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                             # Zolang de episode duurt → debug; nieuwe episode → weer WARNING.
                             if dsuid not in self._joker_divergence_warned:
                                 self._joker_divergence_warned.add(dsuid)
-                                _LOGGER.warning(
-                                    "[DS-DEBUG] Joker-actor %s (%s) DIVERGENTIE: getState.isOn=true "
-                                    "maar getOutputValue=0 (relais fysiek UIT) -> gecorrigeerd naar UIT",
-                                    dsuid, dev.get("name", ""),
-                                )
+                                if vent_rest:
+                                    _LOGGER.warning(
+                                        "[DS-DEBUG] Ventilatie-actor %s (%s) DIVERGENTIE: getState.isOn=true "
+                                        "maar getOutputValue=%s op/onder %d%%-rustdrempel (fysiek UIT) "
+                                        "-> gecorrigeerd naar UIT (gelijk aan ventilatiestatus-sensor)",
+                                        dsuid, dev.get("name", ""), run_out_val,
+                                        VENTILATION_ON_THRESHOLD_PCT,
+                                    )
+                                else:
+                                    _LOGGER.warning(
+                                        "[DS-DEBUG] Joker-actor %s (%s) DIVERGENTIE: getState.isOn=true "
+                                        "maar getOutputValue=0 (relais fysiek UIT) -> gecorrigeerd naar UIT",
+                                        dsuid, dev.get("name", ""),
+                                    )
                             else:
                                 _LOGGER.debug(
                                     "[DS-DEBUG] Joker-actor %s (%s) DIVERGENTIE houdt aan "
@@ -490,6 +641,20 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                             "outputValue=%s (seed=getState)",
                             dsuid, is_on, seed_out_val,
                         )
+                        # Ventilatie-uitgang op rustniveau (raw ~13 = 5%): getState.isOn
+                        # geeft 'true', maar fysiek staat de ventilatie UIT. Seed de switch
+                        # meteen als UIT zodat hij ná herstart niet ten onrechte AAN toont
+                        # (de "verkeerde beginwaarde" die René meldde). SEED-DIAG beta40.
+                        if is_on and dsuid in vent_dsuids and _vent_output_is_off(seed_out_val):
+                            resolved = False
+                            self._device_on_states[dsuid] = False
+                            _LOGGER.info(
+                                "Ventilatie-UMR200 %s (%s): getState.isOn=true maar output raw=%s "
+                                "op/onder %d%%-rustdrempel -> switch geseed als UIT (gelijk aan "
+                                "ventilatiestatus-sensor)",
+                                dsuid[:12], dev.get("name", ""), seed_out_val,
+                                VENTILATION_ON_THRESHOLD_PCT,
+                            )
                     elif old_on != resolved:
                         # Externe wijziging die geen callScene-event opleverde (of gemist
                         # tijdens een event-loop reconnect): de 30s live getState-refresh
@@ -602,7 +767,7 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     bi_state, is_active, old_state,
                 )
 
-    async def fetch_climate_data(self) -> None:
+    async def fetch_climate_data(self, skip_temp_prefetch: bool = False) -> None:
         """Fetch climate control status and config for zones. PRO.
 
         Tries all zones — not just those with GROUP_HEATING/GROUP_TEMP_CONTROL,
@@ -610,26 +775,39 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         control configured at the zone level without heating-group devices.
         Also pre-fetches temperature values so the fallback in has_temp_control
         works at startup even when ControlMode is 0 (cooling mode).
+
+        skip_temp_prefetch: when True, skip the getTemperatureControlValues
+        pre-fetch because the caller already fetched it this cycle (the main
+        poll _async_update_data does so before calling us). Removes a duplicate
+        apartment-wide dSS call per poll cycle (René, 25 aug 2026).
         """
         if not self.pro_enabled:
             return
 
         # Pre-fetch temperature values — needed as fallback when in cooling mode
         # (getTemperatureControlConfig2 may return ControlMode=0 while cooling is active)
-        try:
-            temp_data = await self.api.get_temperature_values()
-            for zone_data in temp_data:
-                zone_id = zone_data.get("id")
-                if zone_id is not None and zone_id > 0:
-                    existing = self._temperatures.get(zone_id, {})
-                    existing.update(zone_data)
-                    self._temperatures[zone_id] = existing
-        except Exception as err:
-            _LOGGER.debug("Pre-fetch temperature values failed: %s", err)
+        if not skip_temp_prefetch:
+            try:
+                temp_data = await self.api.get_temperature_values()
+                for zone_data in temp_data:
+                    zone_id = zone_data.get("id")
+                    if zone_id is not None and zone_id > 0:
+                        existing = self._temperatures.get(zone_id, {})
+                        existing.update(zone_data)
+                        self._temperatures[zone_id] = existing
+            except Exception as err:
+                _LOGGER.debug("Pre-fetch temperature values failed: %s", err)
 
         for zone_id, zone_info in self.zones.items():
-            # Always try to fetch config for zones not yet cached
-            if zone_id not in self._climate_config:
+            # Fetch config once per zone: zones met bevestigde klimaatregeling
+            # zitten in _climate_config, zones die bevestigd GEEN regeling
+            # hebben in _climate_config_checked. Beide worden overgeslagen, zodat
+            # we niet elke vangnet-cyclus opnieuw getTemperatureControlConfig2
+            # aanroepen voor zones waarvan het antwoord al bekend is.
+            if (
+                zone_id not in self._climate_config
+                and zone_id not in self._climate_config_checked
+            ):
                 try:
                     config = await self.api.get_temperature_control_config(zone_id)
                     _LOGGER.info(
@@ -641,6 +819,13 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     control_mode = config.get("ControlMode", config.get("mode", ""))
                     if _is_climate_control_active(control_mode):
                         self._climate_config[zone_id] = config
+                    else:
+                        # Succesvolle call, maar geen actieve klimaatregeling:
+                        # onthoud dit zodat we deze zone niet elke cyclus opnieuw
+                        # bevragen. Alleen bij een geslaagde call (niet in de
+                        # except-tak), zodat een tijdelijke dSS-fout retrybaar
+                        # blijft.
+                        self._climate_config_checked.add(zone_id)
                 except DigitalStromApiError as err:
                     _LOGGER.debug(
                         "Zone %d (%s) no climate config: %s",
@@ -697,10 +882,14 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.debug("Could not fetch heating_system_mode: %s", err)
 
-    async def fetch_sensor_data(self) -> None:
-        """Fetch apartment-wide sensor values (outdoor, per-zone). PRO."""
+    async def fetch_sensor_data(self) -> dict | None:
+        """Fetch apartment-wide sensor values (outdoor, per-zone). PRO.
+
+        Returns the raw getSensorValues response so the caller can hand it to
+        fetch_outdoor_weather and avoid a second identical apartment-wide call
+        in the same poll cycle (René, 25 aug 2026)."""
         if not self.pro_enabled:
-            return
+            return None
         try:
             data = await self.api.get_sensor_values()
             self._outdoor_sensors = data.get("outdoor", {})
@@ -708,8 +897,13 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 zid = zone_data.get("id")
                 if zid:
                     self._zone_sensors[zid] = zone_data
+            # Mark this cycle's apartment cache as fresh. The actual per-device
+            # mapping is done once, by fetch_device_sensors() which runs right
+            # after this in the poll cycle — no double mapping (René, 26 aug 2026).
+            self._zone_sensors_fresh = True
+            return data
         except DigitalStromApiError:
-            pass
+            return None
 
     async def fetch_circuit_data(self) -> None:
         """Fetch dSM circuit/meter information, per-circuit power and energy.
@@ -743,37 +937,73 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                     len(self._circuits),
                     ", ".join(f"{c.get('name','')} [{c.get('hwName','')}]" for c in self._circuits) or "(geen)",
                 )
-            # Fetch per-circuit power + cumulative energy
+            # Fetch power + cumulative energy voor ALLE meters in 2 calls i.p.v.
+            # 2 per circuit. metering/getLatest met from=.meters(all) geeft één
+            # value-entry per meter terug, elk getagd met zijn eigen dSUID én dsid.
+            # Geverifieerd tegen een echte dSS-respons: het dSUID-veld in de entry
+            # is exact gelijk aan circuit["dSUID"] (bv. ...0000003c900), dus we
+            # koppelen 1-op-1 zonder te gokken. type=energy (Wh) blijft een aparte
+            # call — power en energie kunnen niet in één respons.
+            def _index_by_id(values: list[dict] | None) -> dict[str, dict]:
+                idx: dict[str, dict] = {}
+                for v in values or []:
+                    for key in (v.get("dSUID"), v.get("dsid")):
+                        if key:
+                            idx[key] = v
+                return idx
+
+            p_all = e_all = None
+            try:
+                p_all = await self.api.get_metering_latest(meter_dsuid=".meters(all)")
+            except DigitalStromApiError:
+                pass
+            try:
+                # Genormaliseerde metering-API (Wh) — getEnergyMeterValue gaf een raw
+                # waarde met model-afhankelijke eenheid. metering type=energy = consistent.
+                e_all = await self.api.get_metering_latest(
+                    meter_dsuid=".meters(all)", meter_type="energy"
+                )
+            except DigitalStromApiError:
+                pass
+            p_idx = _index_by_id(p_all)
+            e_idx = _index_by_id(e_all)
+
             for circuit in self._circuits:
                 dsuid = circuit.get("dSUID", "")
                 hw = circuit.get("hwName", "")
                 if not dsuid:
                     continue
-                p_raw = e_raw = None
-                try:
-                    p_raw = await self.api.get_metering_latest(
-                        meter_dsuid=f".meters({dsuid})"
-                    )
-                    for v in p_raw:
-                        self._circuit_power[dsuid] = int(v.get("value", 0))
-                except DigitalStromApiError:
-                    pass
-                try:
-                    # Genormaliseerde metering-API (Wh) — getEnergyMeterValue gaf een raw
-                    # waarde met model-afhankelijke eenheid. metering type=energy = consistent.
-                    e_raw = await self.api.get_metering_latest(
-                        meter_dsuid=f".meters({dsuid})", meter_type="energy"
-                    )
-                    for ev in e_raw:
-                        wh = ev.get("value")
-                        if wh and wh > 0:
-                            self._circuit_energy_wh[dsuid] = int(wh)
-                except DigitalStromApiError:
-                    pass
-                # Diagnose-hulp: ruwe metering-respons per dSM (DEBUG).
+                pv = p_idx.get(dsuid)
+                ev = e_idx.get(dsuid)
+                # Vangnet: zit een meter niet in de bulk-respons, haal hem gericht
+                # per-dSM op. Zo verliezen we nooit stilletjes een Energie-sensor —
+                # in het normale geval blijft het bij 2 calls per cyclus.
+                if pv is None:
+                    try:
+                        r = await self.api.get_metering_latest(
+                            meter_dsuid=f".meters({dsuid})"
+                        )
+                        pv = r[0] if r else None
+                    except DigitalStromApiError:
+                        pv = None
+                if ev is None:
+                    try:
+                        r = await self.api.get_metering_latest(
+                            meter_dsuid=f".meters({dsuid})", meter_type="energy"
+                        )
+                        ev = r[0] if r else None
+                    except DigitalStromApiError:
+                        ev = None
+                if pv is not None:
+                    self._circuit_power[dsuid] = int(pv.get("value", 0))
+                if ev is not None:
+                    wh = ev.get("value")
+                    if wh and wh > 0:
+                        self._circuit_energy_wh[dsuid] = int(wh)
+                # Diagnose-hulp: gekoppelde metering-entry per dSM (DEBUG).
                 _LOGGER.debug(
-                    "dSM-meter %s [%s] dsuid=%s → power_raw=%s | energy_raw=%s",
-                    circuit.get("name", ""), hw, dsuid, p_raw, e_raw,
+                    "dSM-meter %s [%s] dsuid=%s → power=%s | energy=%s",
+                    circuit.get("name", ""), hw, dsuid, pv, ev,
                 )
         except DigitalStromApiError as err:
             _LOGGER.debug("Circuit data fetch failed: %s", err)
@@ -904,19 +1134,89 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
             len(self._user_states), len(raw),
         )
 
+    # Zone-level sensor keys (pre-scaled by the dSS) → HA sensor type.
+    _ZONE_SENSOR_KEY_MAP = {
+        "TemperatureValue": SENSOR_TEMPERATURE,
+        "HumidityValue": SENSOR_HUMIDITY,
+        "CO2concentrationValue": SENSOR_CO2,
+        "BrightnessValue": SENSOR_BRIGHTNESS,
+    }
+
+    @staticmethod
+    def _zone_sensor_entries(zone_data: dict) -> list[dict]:
+        """Named-key sensor entries for one zone, tolerant of both dSS shapes.
+
+        Both /json/zone/getSensorValues and the per-zone blocks of
+        /json/apartment/getSensorValues expose their readings as a "values"
+        list of {SensorNameValue: x} dicts. If a caller hands us a flat dict
+        (a zone block without a "values" list), we wrap it so the exact same
+        extraction works either way — no assumption about which shape it is."""
+        if not isinstance(zone_data, dict):
+            return []
+        values = zone_data.get("values")
+        if isinstance(values, list):
+            return values
+        return [zone_data]
+
+    def _map_zone_sensor_data(self, zone_id: int, zone_info: dict, zone_data: dict) -> int:
+        """Map one zone's pre-scaled readings onto the zone's devices.
+
+        Returns the number of values applied."""
+        found = 0
+        for entry in self._zone_sensor_entries(zone_data):
+            if not isinstance(entry, dict):
+                continue
+            for key, stype in self._ZONE_SENSOR_KEY_MAP.items():
+                if key not in entry:
+                    continue
+                try:
+                    val = round(float(entry[key]), 2)
+                except (TypeError, ValueError):
+                    continue
+                # First device in this zone that has this sensor type.
+                dsuid = self._find_device_with_sensor(zone_info, stype)
+                if dsuid:
+                    self._device_sensor_values.setdefault(dsuid, {})[stype] = val
+                    found += 1
+        return found
+
+    def map_zone_sensors_to_devices(self) -> None:
+        """PRO: derive per-device temp/humidity/CO2/brightness from the
+        apartment getSensorValues already fetched this cycle (self._zone_sensors).
+
+        This is the exact same data the FREE per-zone loop would gather, so for
+        PRO installs it lets us skip the extra get_zone_sensor_values call per
+        zone every cycle — that apartment-wide call runs anyway for the outdoor/
+        climate read (René, 26 aug 2026)."""
+        found_count = 0
+        for zone_id, zone_info in self.zones.items():
+            zone_data = self._zone_sensors.get(zone_id)
+            if zone_data:
+                found_count += self._map_zone_sensor_data(zone_id, zone_info, zone_data)
+        _LOGGER.debug("Mapped %d device sensor values from apartment cache", found_count)
+
     async def fetch_device_sensors(self) -> None:
-        """Fetch initial device sensor values via zone/getSensorValues.
+        """Fetch device sensor values (Ulux, thermostats, etc.), zone-level.
 
         The dSS pre-scales all values — no manual bus-encoding needed.
         After startup, real-time updates come via deviceSensorValue events
         (sensorValueFloat, also pre-scaled).
-        """
-        _ZONE_KEY_MAP = {
-            "TemperatureValue": SENSOR_TEMPERATURE,
-            "HumidityValue": SENSOR_HUMIDITY,
-            "CO2concentrationValue": SENSOR_CO2,
-            "BrightnessValue": SENSOR_BRIGHTNESS,
-        }
+
+        PRO: reuse the apartment-wide getSensorValues that fetch_sensor_data()
+        fetched EARLIER THIS SAME cycle (self._zone_sensors) and map it once —
+        no per-zone get_zone_sensor_values calls. The freshness flag guards
+        against two things René flagged (26 aug 2026): (1) it maps only the
+        current cycle's data, so PRO no longer maps last cycle's stale cache
+        here and then remaps fresh in fetch_sensor_data — one mapping per cycle;
+        (2) if the apartment fetch structurally failed this cycle (network
+        hiccup, licence expiring mid-run) the flag stays False, so we fall back
+        to the per-zone vangnet loop instead of silently reusing an ageing
+        cache. FREE: the per-zone loop is the only option (get_zone_sensor_values
+        is license-free; get_sensor_values is PRO-only), so it always runs for
+        free installs."""
+        if self.pro_enabled and self._zone_sensors_fresh:
+            self.map_zone_sensors_to_devices()
+            return
 
         found_count = 0
         for zone_id, zone_info in self.zones.items():
@@ -924,17 +1224,7 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 data = await self.api.get_zone_sensor_values(zone_id)
             except (DigitalStromApiError, DigitalStromAuthError):
                 continue
-
-            for entry in data.get("values", []):
-                for key, stype in _ZONE_KEY_MAP.items():
-                    if key not in entry:
-                        continue
-                    val = round(float(entry[key]), 2)
-                    # Find first device in this zone with matching sensor type
-                    dsuid = self._find_device_with_sensor(zone_info, stype)
-                    if dsuid:
-                        self._device_sensor_values.setdefault(dsuid, {})[stype] = val
-                        found_count += 1
+            found_count += self._map_zone_sensor_data(zone_id, zone_info, data)
 
         _LOGGER.debug("Polled %d sensor values from zone API", found_count)
         # Power/energy polling runs in _power_poll_loop (background task) — not here.
@@ -1071,12 +1361,22 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         1. apartment getTemperatureControlValues (NominalValue)
         2. per-zone getTemperatureControlStatus (NominalValue)
         """
+        # Guard the comparison: right after a dSS restart NominalValue can be
+        # present but explicitly None (dict.get only substitutes the default when
+        # the key is absent). None > 0 would raise TypeError, which — raised from
+        # a climate entity's async_write_ha_state inside async_update_listeners —
+        # aborts the whole listener loop and leaves every entity registered after
+        # it (all power/energy sensors) unavailable. Fall through to None instead.
         data = self._temperatures.get(zone_id)
-        if data and data.get("NominalValue", 0) > 0:
-            return data["NominalValue"]
+        if data:
+            nv = data.get("NominalValue")
+            if isinstance(nv, (int, float)) and not isinstance(nv, bool) and nv > 0:
+                return nv
         status = self._climate_status.get(zone_id)
-        if status and status.get("NominalValue", 0) > 0:
-            return status["NominalValue"]
+        if status:
+            nv = status.get("NominalValue")
+            if isinstance(nv, (int, float)) and not isinstance(nv, bool) and nv > 0:
+                return nv
         return None
 
     def _zone_device_temperature(self, zone_id: int) -> float | None:
@@ -1522,10 +1822,15 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         self._malfunction_names = malf
         self._service_names = serv
 
-    async def fetch_outdoor_weather(self) -> None:
-        """Weather-service outdoor temperature + sun position (PRO). One call."""
+    async def fetch_outdoor_weather(self, data: dict | None = None) -> None:
+        """Weather-service outdoor temperature + sun position (PRO). One call.
+
+        data: an already-fetched getSensorValues response to reuse instead of
+        making a fresh call. The main poll passes the result of
+        fetch_sensor_data() here so getSensorValues runs only once per cycle
+        (René, 25 aug 2026). Standalone callers pass nothing and we fetch."""
         try:
-            res = await self.api.get_sensor_values()
+            res = data if data is not None else await self.api.get_sensor_values()
             outdoor = res.get("outdoor", {}) if isinstance(res, dict) else {}
             for k in ("temperature", "sunazimuth", "sunelevation"):
                 node = outdoor.get(k)
@@ -1635,6 +1940,116 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         return [d for d in self.get_joker_devices_in_zone(zone_id)
                 if d.get("output_mode", 0) > 0 and d.get("binary_inputs")]
 
+    def get_umr200_devices(self) -> list[dict]:
+        """SW-UMR200 actuators whose output is configured for VENTILATION.
+
+        Identified by hwInfo (the UMR200 hardware) AND membership of the dS
+        ventilation group (GROUP_VENTILATION = 10). René (28 aug 2026): a
+        UMR200 configured as yellow (light, group 1) or black (Joker, group 8)
+        must NOT get ventilation entities — only outputs that actually drive a
+        ventilation unit. beta33 gated on hwInfo alone and so mislabelled every
+        UMR200 (light/Joker included) as ventilation, with sensor/switch names
+        wrongly containing "ventilatie". Gating on the colour group fixes that.
+
+        René (28 aug 2026, correctie): his two Overloop outputs are configured
+        as *Woningventilatie* in the dSS — a function of the blue climate colour
+        group, NOT Joker — yet their device groups array surfaces only group 8,
+        not GROUP_VENTILATION (10). The beta40 SEED-DIAG pinned the root cause:
+        such an output reports ``groups=[8, 64]``. René confirmed (28 aug 2026)
+        that de dSS group 64 (GROUP_HOME_VENTILATION) AUTOMATICALLY zodra een
+        UMR200-poort op de blauwe Woningventilatie-functie wordt gezet. Group 64
+        is therefore a reliable automatic marker: any UMR200 output carrying it
+        is admitted without needing the manual whitelist.
+
+        The opt-in ``self.extra_ventilation_dsuids`` whitelist (options flow) is
+        kept as a harmless vangnet for exotic setups, but is no longer needed for
+        a standard Woningventilatie output. Default whitelist is empty → the
+        broad-mislabelling risk from beta33 (every UMR200 tagged as ventilation)
+        stays gone: a UMR200 configured as light (group 1) or plain Joker
+        (group 8 only, no 64) is still excluded.
+        """
+        out = []
+        for dsuid, dev in self.devices.items():
+            hw = (dev.get("hw_info") or "")
+            if UMR200_HW_MARKER not in hw:
+                continue
+            if int(dev.get("output_mode", 0) or 0) <= 0:
+                continue
+            groups = dev.get("groups", [])
+            in_vent_group = GROUP_VENTILATION in groups
+            in_home_vent_group = GROUP_HOME_VENTILATION in groups
+            whitelisted = dsuid.lower() in self.extra_ventilation_dsuids
+            if not (in_vent_group or in_home_vent_group or whitelisted):
+                continue
+            out.append(dev)
+        return out
+
+    async def fetch_ventilation_outputs(self) -> None:
+        """Read the raw relay output level of every SW-UMR200 output.
+
+        getOutputValue (0..255) is the direct relay read — independent of the
+        stale getDevices ``on`` cache and of the isOn divergence that plagues
+        Joker actors. For each UMR200 we read both output offsets (0 and 1) and
+        store raw + percentage. Runs on the ~1×/min vangnet cadence, so at most
+        2 extra calls per UMR200 per minute.
+        """
+        for dev in self.get_umr200_devices():
+            dsuid = dev.get("dsuid")
+            if not dsuid:
+                continue
+            per_offset: dict[int, dict] = {}
+            for offset in VENTILATION_OUTPUT_OFFSETS:
+                seed_key = f"{dsuid}:{offset}"
+                if seed_key in self._umr200_bad_offsets:
+                    continue
+                try:
+                    raw = await self.api.get_device_output_value(dsuid, offset)
+                except Exception as err:
+                    _LOGGER.debug(
+                        "UMR200 %s (%s) getOutputValue offset=%d faalde: %s",
+                        dsuid[:12], dev.get("name", ""), offset, err,
+                    )
+                    fails = self._umr200_offset_fail_counts.get(seed_key, 0) + 1
+                    self._umr200_offset_fail_counts[seed_key] = fails
+                    if fails >= UMR200_OFFSET_FAIL_LIMIT:
+                        self._umr200_bad_offsets.add(seed_key)
+                        _LOGGER.info(
+                            "UMR200 %s (%s) offset=%d faalt structureel (%dx) -- "
+                            "wordt niet meer gepolld deze sessie (geen dS485-uitgang "
+                            "op dit offset)",
+                            dsuid[:12], dev.get("name", ""), offset, fails,
+                        )
+                    continue
+                self._umr200_offset_fail_counts.pop(seed_key, None)
+                raw = int(raw or 0)
+                pct = round(max(0, min(255, raw)) / 255 * 100)
+                per_offset[offset] = {"raw": raw, "pct": pct}
+
+                # SEED-DIAG (beta40, René 28 aug 2026): once per session, dump the
+                # startup seed trio for this UMR200 output so the "wrong initial
+                # value after restart" is diagnosable at INFO (no debug needed).
+                # A group-8+64 Woningventilatie output surfaces as BOTH a Joker
+                # control switch (is_on = getState.isOn seed) AND a ventilation
+                # status sensor (running = getOutputValue > threshold). If those
+                # two disagree at boot, that IS the wrong initial value. Log both.
+                if seed_key not in self._umr200_seed_logged:
+                    self._umr200_seed_logged.add(seed_key)
+                    running = pct > VENTILATION_ON_THRESHOLD_PCT
+                    _LOGGER.info(
+                        "UMR200 SEED-DIAG %s (%s | zone '%s') offset=%d: "
+                        "getOutputValue raw=%d pct=%d%% -> ventilatiestatus running=%s "
+                        "(drempel %d%%); joker-switch on_state=%s; groups=%s",
+                        dsuid, dev.get("name", ""), dev.get("zone_name", ""), offset,
+                        raw, pct, running, VENTILATION_ON_THRESHOLD_PCT,
+                        self.get_device_on_state(dsuid), dev.get("groups", []),
+                    )
+            if per_offset:
+                self._ventilation_outputs[dsuid] = per_offset
+
+    def get_ventilation_output(self, dsuid: str, offset: int) -> dict | None:
+        """Last-known {'raw', 'pct'} for a UMR200 output, or None if not polled yet."""
+        return self._ventilation_outputs.get(dsuid, {}).get(offset)
+
     # =====================================================================
     # Event listener
     # =====================================================================
@@ -1668,22 +2083,25 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
         Contacts, door sensors, and window sensors need faster polling
         than the main 30s update cycle for responsive state tracking.
         """
-        _LOGGER.info("Binary poll loop STARTED (interval=%ds)", POLL_INTERVAL_BINARY)
+        interval = self._binary_poll_interval
+        _LOGGER.info("Binary poll loop STARTED (interval=%ds)", interval)
         poll_count = 0
+        # Log-cadans schaalt mee met het interval: ~elke 5 min een levensteken.
+        log_every = max(1, 300 // interval)
         while True:
             try:
-                await asyncio.sleep(POLL_INTERVAL_BINARY)
+                await asyncio.sleep(interval)
                 await self.poll_binary_input_states()
                 self.async_update_listeners()
                 poll_count += 1
-                if poll_count % 60 == 0:  # Log every 5 minutes
+                if poll_count % log_every == 0:
                     _LOGGER.info("Binary poll loop alive: %d polls completed", poll_count)
             except asyncio.CancelledError:
                 _LOGGER.info("Binary poll loop STOPPED")
                 return
             except Exception as err:
                 _LOGGER.warning("Binary poll loop error: %s", err)
-                await asyncio.sleep(POLL_INTERVAL_BINARY)
+                await asyncio.sleep(interval)
 
     async def _event_loop(self) -> None:
         """Continuously long-poll for events."""
@@ -1744,6 +2162,21 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 "Raw stateChange event: raw_props_type=%s props=%s",
                 type(raw_props).__name__, props,
             )
+
+        if name == "buttonClick":
+            source = event.get("source") or {}
+            dsuid = source.get("dsid") or source.get("dSUID") or ""
+            if dsuid and self.entry_id:
+                async_dispatcher_send(
+                    self.hass,
+                    signal_button_event(self.entry_id),
+                    {
+                        "dsuid": dsuid,
+                        "button_index": props.get("buttonIndex"),
+                        "click_type": props.get("clickType"),
+                    },
+                )
+            return
 
         if name in ("callScene", "undoScene"):
             zone_id = int(props.get("zoneID", 0))
@@ -1949,6 +2382,10 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict:
         """Periodic poll for consumption + temperature + sensors."""
         try:
+            # New cycle: no fresh apartment sensor cache yet.
+            self._zone_sensors_fresh = False
+            sensor_data = None
+
             self._consumption = await self.api.get_consumption()
 
             temp_data = await self.api.get_temperature_values()
@@ -1963,7 +2400,15 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
             # Per-circuit power (FREE)
             await self.fetch_circuit_data()
 
-            # Device sensors: Ulux, thermostats, etc. (FREE)
+            # PRO: fetch the apartment-wide getSensorValues BEFORE mapping device
+            # sensors, so fetch_device_sensors maps THIS cycle's fresh data exactly
+            # once (and can fall back to the per-zone vangnet if this fetch failed).
+            # The response is reused below for the outdoor/sun read — still one
+            # apartment-wide call per cycle (René, 26 aug 2026).
+            if self.pro_enabled:
+                sensor_data = await self.fetch_sensor_data()
+
+            # Device sensors: Ulux, thermostats, etc. (FREE per-zone loop / PRO map)
             await self.fetch_device_sensors()
 
             # Binary input states: handled by separate fast poll loop (_binary_poll_loop)
@@ -1973,10 +2418,18 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
             await self.fetch_apartment_state()
 
             # Joker-ACTOR output-stand LIVE herbevestigen (getState.isOn). callScene-
-            # events houden de switch tussendoor live; deze 30s-refresh is het vangnet
+            # events houden de switch tussendoor live; deze refresh is het vangnet
             # voor gemiste events en vervangt de vroegere (onbetrouwbare) stale-cache-
-            # uitlezing in de 5s binary-poll (René, SW-KL200, 22 aug 2026).
-            await self.fetch_joker_actuator_states()
+            # uitlezing in de 5s binary-poll (René, SW-KL200, 22 aug 2026). Kost tot
+            # ~2×N calls/cyclus (getState + getOutputValue per actor), dus draait als
+            # vangnet op ~1×/min i.p.v. elke hoofdcyclus (René, 26 aug 2026).
+            poll_now = _time.time()
+            if poll_now - self._last_joker_confirm >= self._vangnet_due_threshold:
+                self._last_joker_confirm = poll_now
+                await self.fetch_joker_actuator_states()
+                # SW-UMR200 ventilation output levels ride the same vangnet cadence
+                # (2 getOutputValue calls per UMR200 per minute — negligible load).
+                await self.fetch_ventilation_outputs()
 
             # dSS /usr/states backup-poll (events keep these live in between).
             await self.fetch_dss_states()
@@ -1994,11 +2447,23 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                 except Exception as err:  # never break the poll cycle
                     _LOGGER.debug("Custom states retry fetch failed: %s", err)
 
-            # Pro features: extra data
+            # Pro features: extra data. getTemperatureControlValues is already
+            # fetched above (skip_temp_prefetch), and getSensorValues was fetched
+            # once earlier this cycle (sensor_data) and is reused for the
+            # outdoor/sun read — no duplicate apartment-wide dSS calls per cycle
+            # (René, 25 + 26 aug 2026).
             if self.pro_enabled:
-                await self.fetch_sensor_data()
-                await self.fetch_climate_data()
-                await self.fetch_outdoor_weather()  # weather-service temp + sun position
+                # De per-zone climate-status-poll (getTemperatureControlStatus per
+                # zone, ~N calls) is ook alleen vangnet — stateChange-events houden
+                # de setpoints/mode tussendoor live. Draai 'm op dezelfde ~1×/min
+                # vangnet-cadans i.p.v. elke hoofdcyclus (René, 26 aug 2026). De
+                # getTemperatureControlValues-prefetch is al deze cyclus gedaan, dus
+                # blijft skip_temp_prefetch=True.
+                climate_now = _time.time()
+                if climate_now - self._last_climate_poll >= self._vangnet_due_threshold:
+                    self._last_climate_poll = climate_now
+                    await self.fetch_climate_data(skip_temp_prefetch=True)
+                await self.fetch_outdoor_weather(data=sensor_data)
 
         except DigitalStromAuthError:
             _LOGGER.warning("Auth error during poll, reconnecting...")

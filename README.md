@@ -23,8 +23,11 @@ Unlike traditional per-device polling integrations, Digital Strom Smart uses the
 |--|---------------------|-------------------|
 | **Control method** | Individual device commands | Zone scenes (one command, all devices respond) |
 | **State updates** | Polling every 10-30s per device | Real-time event subscription |
-| **Bus load** | ~50+ requests/min (10 zones) | ~0.4 requests/min + 1 event connection |
-| **Risk** | Can corrupt apartments.xml | Safe — uses only standard API calls |
+| **dS485 bus reads** | One serial bus read per device, per poll | None in steady state — event-driven; per-device sensor/power bus polling is disabled |
+| **dSS web-API load** | ~50+ requests/min (10 zones), each triggering a bus read | ~25-35 lightweight requests/min, all served from the dSS cache + 1 persistent event connection |
+| **Risk** | Can starve the dSM metering controller and corrupt apartments.xml | Safe — cache-served API calls only, no per-device bus polling |
+
+> **A note on real-world load (thanks to René van der Gaag for flagging this).** Earlier versions of this table claimed "~0.4 requests/min", which understated the actual figure. The integration does keep the **dS485 bus** essentially idle — that is the load that matters, because per-device bus reads are what starve the dSM metering controller. But it does make a modest, steady stream of **cache-served HTTP calls** to the dSS web API: a device poll every 5 s (contacts/doors/output states, one `apartment/getDevices` call), a ~30 s cycle of consumption/temperature/circuit/state calls, and one long-poll `event/get` connection. On a running installation that adds up to roughly **25-35 requests per minute** (a bit more with the Pro climate/sensor features and many Joker actuators). None of these touch the dS485 bus, so they are cheap for the dSS to serve.
 
 ## Features
 
@@ -42,6 +45,7 @@ Unlike traditional per-device polling integrations, Digital Strom Smart uses the
 - **System scene switches** — trigger Panic, Fire/Brand, Alarm 1-4 and Doorbell apartment-wide from HA as switches (via `apartment/callScene`); each switch reads the real dSS state back, so it returns to off by itself if the dSS ignores the scene
 - **Environment states** — Day/Night, Twilight, Daylight and Holiday from the dSS as read-only binary sensors
 - **Event-driven** — instant state updates when someone uses a wall switch
+- **Button / rocker events** — dS pushbuttons and EnOcean rockers appear as `event` entities that fire on a physical press (event types for tap / double / hold per paddle), so a wall button can trigger HA automations directly
 - **Scenes for all groups** — Light, Shade, and Heating scenes
 
 ### Pro
@@ -49,6 +53,8 @@ Unlike traditional per-device polling integrations, Digital Strom Smart uses the
 Unlock advanced features with a Pro license key from [wooniot.nl/pro](https://wooniot.nl/pro):
 
 - **Climate control** — target temperature, preset modes (Comfort, Economy, Night, Holiday), heating + cooling detection
+- **Joker actuator switches (SW-KL and other SW-* actuators)** — individual on/off control per Joker actuator, with reliable output status after a restart (live per-device query)
+- **Home ventilation (SW-UMR200)** — automatic detection of ventilation units on dS group 64, with on/off status and level (%) per output, and control
 - **Presence mode** — read and set the apartment presence state (Present, Absent, Sleeping, …) as a select entity
 - **User Defined Actions** — actions configured in the dSS Configurator appear as Home Assistant **buttons**
 - **User Defined States** — custom and apartment-wide dSS states appear as **sensors / binary sensors** with live updates from `stateChange` events
@@ -131,6 +137,9 @@ For each zone with devices:
 Individual Joker devices:
 - `switch.<zone>_<device_name>` — Per-device on/off control (actuators with outputMode > 0)
 - `binary_sensor.<zone>_<device_name>` — Contact/smoke/door sensors (devices with outputMode == 0)
+
+Buttons / rockers:
+- `event.<button_name>` — fires on a physical dS pushbutton / EnOcean rocker press (device class `button`; event types like `up_single`, `down_single`, `up_hold`, derived from the dSS `buttonClick`). Devices that emit a `buttonClick` are picked up automatically on first press; buttons configured to call a scene (which emit `callScene` instead, with no per-device source) are not exposed individually.
 
 Device-level sensors (Ulux, etc.):
 - `sensor.<zone>_<device>_temperature` — Device temperature
@@ -244,11 +253,9 @@ Home Assistant automatically uses the correct language based on your system lang
 
 ## Changelog
 
-### v4.2.0 (2026-08-24) — Reliable Joker actuator status (SW-KL) & user-defined state switches
+### v4.2.0-beta32 — Accurate dSS load documentation
 
-- **Joker actuators that also have an input (e.g. SW-KL / KL200) now report the correct on/off status.** Previously the relay output and the binary input shared a single state slot, so the status could be wrong right after startup or flip after a dSS restart. Output and input are now tracked in separate state slots, the output state is confirmed at (re)start via `getOutputValue`, and a stale device cache no longer overwrites the live output. A runtime gate only corrects a false "on" when the relay output is actually zero — no blind guessing. Verified in the field over several days and restarts.
-- **User-defined (custom) states can be controlled as switches.** Writable custom states are exposed as switches and written correctly to the dSS (by state name, using the `addon` parameter); read-only states are no longer shown as switches, and a real dSS write error is surfaced instead of failing silently.
-- **Cleaner logs** — verbose `[DS-DEBUG]` diagnostics moved to debug level, and the Joker divergence warning is edge-triggered (once per episode) instead of flooding the log.
+- **Corrected the "load on the dSS" comparison table.** The old table claimed "~0.4 requests/min", which understated the real figure. It now separates **dS485 bus reads** (kept idle — this is the load that matters for metering integrity) from **cache-served dSS web-API calls** (~25-35/min on a running install: the 5 s device poll, the 30 s cycle, and the event long-poll). Docs only — no functional change. Thanks to René van der Gaag for flagging the discrepancy against his live installation.
 
 ### v4.1.4 (2026-06-25) — Control value sensor (cooling/heating demand from DS)
 

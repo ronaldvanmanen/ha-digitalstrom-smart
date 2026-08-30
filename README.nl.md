@@ -23,8 +23,11 @@ Anders dan traditionele integraties die per apparaat pollen, gebruikt Digital St
 |--|---------------------|-------------------|
 | **Bedieningswijze** | Individuele apparaatcommando's | Zonescenes (één commando, alle apparaten reageren) |
 | **Status-updates** | Polling elke 10-30s per apparaat | Realtime event-abonnement |
-| **Busbelasting** | ~50+ verzoeken/min (10 zones) | ~0,4 verzoeken/min + 1 event-verbinding |
-| **Risico** | Kan apartments.xml beschadigen | Veilig — gebruikt alleen standaard-API-calls |
+| **dS485-buslezingen** | Eén seriële buslezing per apparaat, per poll | Geen in rusttoestand — event-gedreven; per-apparaat sensor-/vermogenspolling over de bus is uitgeschakeld |
+| **dSS web-API-belasting** | ~50+ verzoeken/min (10 zones), elk met een buslezing | ~25-35 lichte verzoeken/min, allemaal uit de dSS-cache + 1 permanente event-verbinding |
+| **Risico** | Kan de dSM-meetcontroller uithongeren en apartments.xml beschadigen | Veilig — alleen cache-bediende API-calls, geen per-apparaat buspolling |
+
+> **Over de werkelijke belasting (met dank aan René van der Gaag voor de tip).** Eerdere versies van deze tabel noemden "~0,4 verzoeken/min", en dat gaf een te rooskleurig beeld. De integratie houdt de **dS485-bus** inderdaad vrijwel stil — en dát is de belasting die telt, want per-apparaat buslezingen zijn wat de dSM-meetcontroller uithongert. Maar ze doet wél een bescheiden, gestage stroom **cache-bediende HTTP-calls** naar de dSS web-API: een apparaat-poll elke 5 s (contacten/deuren/uitgangsstanden, één `apartment/getDevices`-call), een cyclus van ~30 s met verbruik/temperatuur/stroomkring/status-calls, en één long-poll `event/get`-verbinding. Op een draaiende installatie komt dat neer op grofweg **25-35 verzoeken per minuut** (iets meer met de Pro klimaat-/sensorfuncties en veel Joker-actoren). Geen van deze raakt de dS485-bus, dus ze zijn goedkoop voor de dSS om te bedienen.
 
 ## Functies
 
@@ -244,11 +247,17 @@ Home Assistant gebruikt automatisch de juiste taal op basis van je systeemtaal. 
 
 ## Wijzigingslog
 
+<<<<<<< HEAD
 ### v4.2.0 (24-08-2026) — Betrouwbare Joker-actor-status (SW-KL) & schakelbare gebruikersstatussen
 
 - **Joker-actoren die óók een ingang hebben (bijv. SW-KL / KL200) tonen nu de juiste aan/uit-status.** Voorheen deelden de relais-uitgang en de binaire ingang één status-slot, waardoor de status vlak na het opstarten fout kon zijn of na een dSS-herstart kon omklappen. Uitgang en ingang zitten nu in aparte status-slots, de uitgangsstand wordt bij (her)start bevestigd via `getOutputValue`, en een verouderde apparaat-cache overschrijft de live uitgang niet meer. Een runtime-controle corrigeert een valse "aan" alléén als de relais-uitgang echt nul is — geen blinde gok. In het veld bevestigd over meerdere dagen en herstarts.
 - **Gebruikersgedefinieerde (custom) statussen zijn als schakelaar te bedienen.** Schrijfbare custom-statussen verschijnen als schakelaar en worden correct naar de dSS geschreven (op de status-naam, met de `addon`-parameter); alleen-lezen statussen worden niet meer als schakelaar getoond, en een echte dSS-schrijffout wordt zichtbaar gemaakt in plaats van stil te falen.
 - **Schonere logging** — uitgebreide `[DS-DEBUG]`-diagnostiek naar debug-niveau, en de Joker-divergentie-waarschuwing is edge-getriggerd (één keer per episode) in plaats van de log te overspoelen.
+=======
+### v4.2.0-beta32 — Correcte documentatie van de dSS-belasting
+
+- **Vergelijkingstabel van de "belasting op de dSS" gecorrigeerd.** De oude tabel noemde "~0,4 verzoeken/min", wat de werkelijke waarde onderschatte. Ze onderscheidt nu **dS485-buslezingen** (blijven stil — dát is de belasting die telt voor de meetintegriteit) van **cache-bediende dSS web-API-calls** (~25-35/min op een draaiende installatie: de 5 s apparaat-poll, de 30 s cyclus en de event long-poll). Alleen documentatie — geen functionele wijziging. Met dank aan René van der Gaag voor het signaleren van de afwijking t.o.v. zijn live installatie.
+>>>>>>> feat/vent-auto-group64
 
 ### v4.1.4 (25-06-2026) — Regelwaarde-sensor (koel-/verwarmvraag uit de DS)
 
