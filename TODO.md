@@ -24,3 +24,20 @@ Eén firmware-update (1.19.12→1.19.13) veroorzaakte een KETTING: (a) nieuw DHC
 **SERVER-SIDE (telemetry/license, Hetzner):** detecteer dss_id-flip in de pings (identieke zones/devices/MAC-vingerafdruk onder nieuw id, pro=0) → AUTO-herbind of alert i.p.v. de klant op Free zetten. Server-side tegenhanger van fix #1.
 
 **README (EN/NL/DE) — sectie "Na een dSS firmware-update (bv. 1.19.13)":** IP kan wijzigen → **DHCP-reservering/statisch IP aanraden**; app-token kan ongeldig worden → re-pair/reauth (token accorderen in dSS-admin); dss_id kan flippen → Pro wordt server-side herbonden (contact support). Tip: statisch IP voorkomt de helft.
+
+## LESSEN Visser 2 sep 2026 (v4.1.9 → v4.2.1 update + on-site HVAC-sessie) → KERNPUNT: geen initiële state-fetch
+
+**Waargenomen (herhaald deze dag):** na ELKE HA-(re)start of config-entry-reload zijn DS-entiteiten onvolledig/None tot de dSS TOEVALLIG een event voor die entity pusht:
+- `climate.<zone>` **current_temperature én temperature(setpoint) = None** bij startup — kwam pas binnen bij een Thanos-event. Setpoint (21°C) was daardoor niet uit HA leesbaar; vereiste een `input_number.<zone>_doeltemp`-vangnet aan klantzijde.
+- **covers 2/16, scenes 164/244** direct na herstart; pas een `homeassistant.reload_config_entry` (of een DS-event) haalde de volledige set terug. 2× gezien deze dag (na de v4.2.1-restart én na een onbedoelde stroomonderbreking).
+- `homeassistant.update_entity` op een DS-sensor haalde GEEN verse waarde — `sensor.<zone>_temperatuur` bleef 1,5 u op de oude meting staan terwijl de dSS live updatete.
+
+**KERNFIX voor volgende versie: initiële + periodieke state-fetch (pull), niet puur event-driven.**
+1. Bij `async_setup_entry`/coordinator-first-refresh: haal voor ALLE entiteiten (climate current_temp + setpoint, covers, scenes-status, sensoren) één keer de actuele waarde uit de dSS (`getSensorValues` / apartment-structuur), i.p.v. wachten op de eerste stateChange-push. Zo is HA na (re)start meteen compleet.
+2. Maak `update_entity`/een periodieke poll (bv. coordinator-interval) functioneel voor de zone-temperatuur én setpoint, zodat een bevroren sensor zichzelf herstelt zonder reload.
+3. Setpoint pollbaar maken lost het "setpoint=None na changeover/startup"-probleem structureel op → de klantzijdige doeltemp-helper wordt dan overbodig (nu noodzaak).
+NB: dit gedrag was er ook al in v3.3.22/v4.1.9; v4.2.1 heeft het NIET opgelost (live geverifieerd 2 sep).
+
+**Kleiner:** sensor-label-verwisseling entree↔verkeersruimte (friendly name ≠ zone) — 1 jul klantzijdig omzeild; hoort als integratie-bug in de zone→sensor-mapping gefixt.
+
+**Positief bevestigd v4.2.1:** update via HACS + HA-restart = schoon (9/9 climate-zones intact, geen entity-hernoemingen, Pro bleef geldig, dss_id ongewijzigd). De auto-reauth/licentie-hercheck (fix #2/#4) werkten: Pro bleef `valid` door de hele sessie incl. dubbele reboot.
