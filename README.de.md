@@ -325,6 +325,35 @@ Home Assistant verwendet automatisch die richtige Sprache basierend auf Ihrer Sy
 - Eventgesteuerte Architektur mit Echtzeit-Status-Updates
 - Lokale und Cloud-Verbindung
 
+## Cyber Resilience Act (EU 2024/2847)
+
+Diese Integration ist als Produkt mit digitalen Elementen registriert und verfügt über eine
+veröffentlichte Compliance-Akte. Der Status unten ist live — ein Klick zeigt den tatsächlichen
+Stand, kein von uns selbst eingefärbtes Bild.
+
+[![CRA status](https://dev.cra-portal.eu/api/dossiers/verify/21/badge.svg)](https://dev.cra-portal.eu/verify.html?p=21)
+
+**Selbst prüfen:** [https://dev.cra-portal.eu/verify.html?p=21](https://dev.cra-portal.eu/verify.html?p=21)
+
+| Bestandteil | Status |
+|-------------|--------|
+| EU-Konformitätserklärung | Veröffentlicht |
+| Richtlinie zur Meldung von Schwachstellen | Veröffentlicht |
+| Technische Dokumentation (Anhang VII) | Veröffentlicht |
+| Risikobewertung | Vier Bereiche: Zugriff, Vertraulichkeit, Lieferkette, sichere Updates |
+| Software-Stückliste (CycloneDX) | Veröffentlicht |
+
+**Warum dies gilt.** Die Ausnahme für freie und quelloffene Software greift nicht für Software,
+die im Rahmen einer Geschäftstätigkeit angeboten wird. Da diese Integration auch mit einer
+kostenpflichtigen Pro-Lizenz verkauft wird, fällt sie in den Anwendungsbereich — und so behandeln
+wir sie.
+
+**Eine Schwachstelle melden.** Schreiben Sie an **security@wooniot.nl**. Wir bestätigen den
+Eingang innerhalb von 72 Stunden und teilen innerhalb von zehn Werktagen mit, ob wir den Befund
+bestätigen. Aktiv ausgenutzte Schwachstellen und schwerwiegende Vorfälle melden wir gemäß
+Artikel 14 an die Behörden; dieser gilt ab dem **11. September 2026**. Die vollständige Richtlinie
+finden Sie in der oben verlinkten Akte.
+
 ## Über uns
 
 Entwickelt von **[Woon IoT BV](https://wooniot.nl)** — professionelle Digital Strom Installateure und Smart-Home-Spezialisten aus den Niederlanden.

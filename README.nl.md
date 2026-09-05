@@ -335,6 +335,33 @@ De ontvangende server is `ha-ds.internetist.nl` (beheerd door Woon IoT BV, gehos
 
 > Let op: proeflicenties vereisen ingeschakelde telemetrie. Betaalde Pro-licenties werken zonder telemetrie.
 
+## Cyber Resilience Act (EU 2024/2847)
+
+Deze integratie staat geregistreerd als product met digitale elementen en heeft een gepubliceerd
+compliance-dossier. De status hieronder is live — klik erop en je ziet de werkelijke stand, geen
+plaatje dat wij zelf hebben ingekleurd.
+
+[![CRA status](https://dev.cra-portal.eu/api/dossiers/verify/21/badge.svg)](https://dev.cra-portal.eu/verify.html?p=21)
+
+**Controleer zelf:** [https://dev.cra-portal.eu/verify.html?p=21](https://dev.cra-portal.eu/verify.html?p=21)
+
+| Onderdeel | Status |
+|-----------|--------|
+| EU-verklaring van overeenstemming | Gepubliceerd |
+| Beleid voor het melden van kwetsbaarheden | Gepubliceerd |
+| Technische documentatie (Bijlage VII) | Gepubliceerd |
+| Risicobeoordeling | Vier gebieden: toegang, vertrouwelijkheid, toeleveringsketen, veilig bijwerken |
+| Softwarestuklijst (CycloneDX) | Gepubliceerd |
+
+**Waarom dit van toepassing is.** De uitzondering voor vrije en open-source software geldt niet
+voor software die in het handelsverkeer wordt aangeboden. Omdat deze integratie ook met een
+betaalde Pro-licentie wordt verkocht, valt zij binnen de reikwijdte — en zo behandelen wij haar.
+
+**Een kwetsbaarheid melden.** Mail **security@wooniot.nl**. Wij bevestigen de ontvangst binnen 72
+uur en laten binnen tien werkdagen weten of wij de melding bevestigen. Actief uitgebuite
+kwetsbaarheden en ernstige incidenten melden wij bij de autoriteiten volgens artikel 14, dat
+geldt vanaf **11 september 2026**. Het volledige beleid staat in het dossier hierboven.
+
 ## Over
 
 Ontwikkeld door **[Woon IoT BV](https://wooniot.nl)** — professionele Digital Strom-installateurs en smarthome-specialisten in Nederland.

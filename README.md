@@ -467,6 +467,33 @@ The receiving server is `ha-ds.internetist.nl` (operated by WoonIoT BV, hosted i
 
 > Note: Trial licenses require telemetry to be enabled. Paid Pro licenses work without telemetry.
 
+## Cyber Resilience Act (EU 2024/2847)
+
+This integration is registered as a product with digital elements and has a published compliance
+dossier. The status below is live — click it to see the current state, not a picture we coloured
+in ourselves.
+
+[![CRA status](https://dev.cra-portal.eu/api/dossiers/verify/21/badge.svg)](https://dev.cra-portal.eu/verify.html?p=21)
+
+**Verify:** [https://dev.cra-portal.eu/verify.html?p=21](https://dev.cra-portal.eu/verify.html?p=21)
+
+| Item | Status |
+|------|--------|
+| EU Declaration of Conformity | Published |
+| Vulnerability disclosure policy | Published |
+| Technical documentation (Annex VII) | Published |
+| Risk assessment | Four areas: access control, confidentiality, supply chain, secure updates |
+| Software bill of materials (CycloneDX) | Published |
+
+**Why this applies.** The free-and-open-source exemption in the CRA does not cover software
+offered in the course of a commercial activity. Because this integration is also sold with a paid
+Pro licence, it falls within scope — and we treat it that way.
+
+**Reporting a vulnerability.** Mail **security@wooniot.nl**. We confirm receipt within 72 hours
+and tell you within ten working days whether we confirm the finding. Actively exploited
+vulnerabilities and severe incidents are reported to the authorities under Article 14, which
+applies from **11 September 2026**. Full policy in the dossier linked above.
+
 ## About
 
 Developed by **[Woon IoT BV](https://wooniot.nl)** — professional Digital Strom installers and smart home specialists based in the Netherlands.
