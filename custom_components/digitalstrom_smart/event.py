@@ -18,6 +18,7 @@ import logging
 from homeassistant.components.event import EventDeviceClass, EventEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -70,10 +71,23 @@ async def async_setup_entry(
     uid_prefix = f"ds_{dss_id}_{_UNIQUE_PREFIX}"
     known: set[str] = set()
 
+    # HA 2027.8.0 verwijdert het lazy `via_device`-tuple; resolve de parent
+    # (het dSS/apartment-device) nu zelf en geef zijn `.id` mee aan de entiteiten.
+    dev_reg = dr.async_get(hass)
+    apartment_device_id = dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"{dss_id}_apartment")},
+        name="Digital Strom Server",
+        manufacturer=MANUFACTURER,
+        model="dSS",
+    ).id
+
     def _make(dsuid: str, initial: dict | None = None) -> "DigitalStromButtonEvent":
         known.add(dsuid.lower())
         dev = coordinator.devices.get(dsuid) or coordinator.devices.get(dsuid.lower()) or {}
-        return DigitalStromButtonEvent(coordinator, entry.entry_id, dsuid, dev, initial)
+        return DigitalStromButtonEvent(
+            coordinator, entry.entry_id, dsuid, dev, apartment_device_id, initial
+        )
 
     entities: list[DigitalStromButtonEvent] = []
 
@@ -127,6 +141,7 @@ class DigitalStromButtonEvent(EventEntity):
         entry_id: str,
         dsuid: str,
         dev: dict,
+        apartment_device_id: str | None = None,
         initial: dict | None = None,
     ) -> None:
         self._entry_id = entry_id
@@ -139,7 +154,7 @@ class DigitalStromButtonEvent(EventEntity):
             "name": dev.get("name") or dsuid,
             "manufacturer": MANUFACTURER,
             "model": dev.get("hw_info") or "Button",
-            "via_device": (DOMAIN, f"{dss_id}_apartment"),
+            "via_device_id": apartment_device_id,
         }
 
     async def async_added_to_hass(self) -> None:
