@@ -239,6 +239,29 @@ Home Assistant verwendet automatisch die richtige Sprache basierend auf Ihrer Sy
 
 ## Änderungsprotokoll
 
+### v4.2.2 (2026-09-21) — Schnellere Bewegung/Anwesenheit, Home-Assistant-Deprecations behoben
+
+- **Bewegung und Anwesenheit reagieren nahezu sofort.** Binäre Geräteeingänge (Bewegungs-, Anwesenheits- und Kontaktsensoren an Jokern, z. B. IC-BW-HS-300) werden jetzt über das dSS-Abonnement `deviceBinaryInputEvent` geliefert, statt auf die 5-Sekunden-Sicherheitsabfrage zu warten. Eine Automatisierung von Bewegung zu Licht wurde mit **~48 ms** gemessen, zuvor waren es 5 bis 7 Sekunden (Issue #39). Die Abfrage bleibt als Rückfallebene erhalten.
+- **Klima: ausdrückliche Unterstützung für TURN_ON und TURN_OFF.** Der Zonenthermostat deklariert nun `ClimateEntityFeature.TURN_ON` und `TURN_OFF` und führt beide Aufrufe tatsächlich aus. Home Assistant entfernt die bisherige Übergangslösung, was erst Warnungen und später Fehler verursacht hätte.
+- **Geräteregister: `via_device` durch `via_device_id` ersetzt.** Übergeordnete Geräte (Wohnung/dSS und Zone) werden einmalig beim Start aufgelöst und per Id übergeben. Damit entfällt die Deprecation-Warnung, und die Integration funktioniert auch in Home Assistant Core 2027.8.0 und später.
+
+Alle drei Änderungen wurden von René van der Gaag in seiner laufenden Installation getestet und bestätigt.
+
+### v4.2.1 (2026-08-30) — Wohnungslüftung, zuverlässiger Joker/SW-KL-Status, Luftfeuchtigkeit im Klima
+
+- Zuverlässiger Status von Joker/SW-KL-Aktoren nach einem Neustart (Live-Abfrage pro Gerät statt des veralteten Sammel-Caches).
+- Wohnungslüftung (SW-UMR200): automatische Erkennung in dS-Gruppe 64, Ein/Aus-Status und Stufe (%) je Ausgang sowie Bedienung.
+- Relative Luftfeuchtigkeit direkt in der Klima-Entität (z. B. FTW06-Thermostat).
+- Schalter für benutzerdefinierte Zustände schreiben nun korrekt in die dSS; weniger unnötiger dS485-Busverkehr; Robustheitskorrekturen für Klima und Zonen.
+
+Hinweis: der zuverlässige SW-KL/Joker-Status und die SW-UMR200-Lüftungsfunktionen erfordern eine Pro-Lizenz.
+
+### v4.2.0 (2026-08-18) — Joker-Aktorstatus und Schalter für eigene Zustände
+
+- Joker-Aktoren mit zusätzlichem Eingang melden nun den richtigen Ein/Aus-Status: Relaisausgang und Binäreingang haben jeweils einen eigenen Platz statt eines gemeinsamen.
+- Beschreibbare benutzerdefinierte Zustände erscheinen als Schalter und werden korrekt in die dSS geschrieben; schreibgeschützte Zustände werden nicht mehr als Schalter angezeigt.
+- Sauberere Logs: ausführliche `[DS-DEBUG]`-Diagnostik auf Debug-Ebene, Joker-Divergenzwarnung nur noch einmal je Episode.
+
 ### v4.2.0-beta32 — Korrekte Dokumentation der dSS-Last
 
 - **Vergleichstabelle der „Last auf dem dSS" korrigiert.** Die alte Tabelle nannte „~0,4 Anfragen/Min" und untertrieb damit den realen Wert. Sie unterscheidet nun **dS485-Bus-Lesezugriffe** (bleiben im Leerlauf — das ist die für die Metering-Integrität entscheidende Last) von **cache-bedienten dSS-Web-API-Aufrufen** (~25-35/Min auf einer laufenden Installation: der 5-s-Geräte-Poll, der 30-s-Zyklus und der Event-Long-Poll). Nur Dokumentation — keine funktionale Änderung. Dank an René van der Gaag für den Hinweis auf die Abweichung gegenüber seiner Live-Installation.

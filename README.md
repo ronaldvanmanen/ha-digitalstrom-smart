@@ -253,6 +253,29 @@ Home Assistant automatically uses the correct language based on your system lang
 
 ## Changelog
 
+### v4.2.2 (2026-09-21) — Faster motion/presence, Home Assistant deprecation fixes
+
+- **Motion and presence react near-instantly.** Device binary inputs (motion, presence and contact sensors on Jokers, e.g. IC-BW-HS-300) are now driven by the dSS `deviceBinaryInputEvent` subscription instead of waiting for the 5-second safety poll. A motion-to-light automation measured **~48 ms** from movement to light on, where it previously took 5-7 seconds (issue #39). The poll remains as a fallback, so nothing breaks if the event stream drops.
+- **Climate: explicit TURN_ON / TURN_OFF support.** The zone thermostat now declares `ClimateEntityFeature.TURN_ON` and `TURN_OFF` and implements both calls. Home Assistant is removing the backwards-compatibility shim for this, which would have caused warnings and eventually errors.
+- **Device registry: `via_device` replaced by `via_device_id`.** Parent devices (apartment/dSS and zone) are resolved once during setup and passed by id. This clears the deprecation warning that flagged the integration and keeps it working in Home Assistant Core 2027.8.0 and later.
+
+All three changes were tested and confirmed in the field by René van der Gaag on his live installation.
+
+### v4.2.1 (2026-08-30) — Home ventilation, reliable Joker/SW-KL status, humidity in climate
+
+- Reliable Joker/SW-KL actuator status after a restart (live per-device query instead of the stale bulk cache).
+- Home ventilation (SW-UMR200): automatic detection on dS group 64, on/off status and level (%) per output, and control.
+- Relative humidity shown directly in the climate entity (e.g. FTW06 thermostat).
+- User Defined State switches now write correctly to the dSS; less needless dS485 bus polling; climate/zone robustness fixes.
+
+Note: reliable SW-KL/Joker status and the SW-UMR200 ventilation features require a Pro license.
+
+### v4.2.0 (2026-08-18) — Joker actuator status and custom-state switches
+
+- Joker actuators that also have an input now report the correct on/off status: relay output and binary input are tracked in separate slots instead of sharing one.
+- Writable user-defined states are exposed as switches and written correctly to the dSS; read-only states are no longer shown as switches.
+- Cleaner logs: verbose `[DS-DEBUG]` diagnostics moved to debug level, Joker divergence warning is edge-triggered.
+
 ### v4.2.0-beta32 — Accurate dSS load documentation
 
 - **Corrected the "load on the dSS" comparison table.** The old table claimed "~0.4 requests/min", which understated the real figure. It now separates **dS485 bus reads** (kept idle — this is the load that matters for metering integrity) from **cache-served dSS web-API calls** (~25-35/min on a running install: the 5 s device poll, the 30 s cycle, and the event long-poll). Docs only — no functional change. Thanks to René van der Gaag for flagging the discrepancy against his live installation.

@@ -247,6 +247,29 @@ Home Assistant gebruikt automatisch de juiste taal op basis van je systeemtaal. 
 
 ## Wijzigingslog
 
+### v4.2.2 (2026-09-21) — Snellere beweging/aanwezigheid, Home Assistant-deprecaties opgelost
+
+- **Beweging en aanwezigheid reageren vrijwel direct.** Binaire ingangen van apparaten (beweging, aanwezigheid en contactsensoren op Jokers, bijvoorbeeld de IC-BW-HS-300) komen nu binnen via de dSS-subscriptie `deviceBinaryInputEvent` in plaats van te wachten op de vangnet-poll van 5 seconden. Een automatisering van beweging naar licht is gemeten op **~48 ms**, waar dat eerder 5 tot 7 seconden was (issue #39). De poll blijft als vangnet bestaan, dus er gaat niets stuk als de eventstroom wegvalt.
+- **Klimaat: expliciete ondersteuning voor TURN_ON en TURN_OFF.** De zonethermostaat declareert nu `ClimateEntityFeature.TURN_ON` en `TURN_OFF` en voert beide aanroepen echt uit. Home Assistant haalt de terugvaloplossing hiervoor weg, wat eerst waarschuwingen en later fouten zou geven.
+- **Apparatenregister: `via_device` vervangen door `via_device_id`.** Bovenliggende apparaten (appartement/dSS en zone) worden eenmalig bij het opstarten opgezocht en op id doorgegeven. Daarmee verdwijnt de deprecatiewaarschuwing die de integratie markeerde en blijft alles werken in Home Assistant Core 2027.8.0 en later.
+
+Alle drie de wijzigingen zijn door René van der Gaag op zijn eigen installatie getest en bevestigd.
+
+### v4.2.1 (2026-08-30) — Woningventilatie, betrouwbare Joker/SW-KL-status, luchtvochtigheid in klimaat
+
+- Betrouwbare status van Joker/SW-KL-actoren na een herstart (live opvraag per apparaat in plaats van de verouderde bulkcache).
+- Woningventilatie (SW-UMR200): automatische herkenning op dS-groep 64, aan/uit-status en niveau (%) per uitgang, en bediening.
+- Relatieve luchtvochtigheid direct zichtbaar in de klimaatentiteit (bijvoorbeeld de FTW06-thermostaat).
+- Schakelaars voor door de gebruiker gedefinieerde toestanden schrijven nu correct naar de dSS; minder onnodig dS485-busverkeer; robuustheidsfixes voor klimaat en zones.
+
+Let op: de betrouwbare SW-KL/Joker-status en de SW-UMR200-ventilatiefuncties vereisen een Pro-licentie.
+
+### v4.2.0 (2026-08-18) — Joker-actorstatus en schakelaars voor eigen toestanden
+
+- Joker-actoren die ook een ingang hebben, melden nu de juiste aan/uit-status: de relaisuitgang en de binaire ingang hebben elk een eigen plek in plaats van één gedeelde.
+- Schrijfbare eigen toestanden verschijnen als schakelaar en worden correct naar de dSS geschreven; alleen-lezen toestanden worden niet meer als schakelaar getoond.
+- Schonere logs: uitgebreide `[DS-DEBUG]`-diagnostiek naar debugniveau, Joker-divergentiewaarschuwing nog maar eenmaal per episode.
+
 ### v4.2.0-beta32 — Correcte documentatie van de dSS-belasting
 
 - **Vergelijkingstabel van de "belasting op de dSS" gecorrigeerd.** De oude tabel noemde "~0,4 verzoeken/min", wat de werkelijke waarde onderschatte. Ze onderscheidt nu **dS485-buslezingen** (blijven stil — dát is de belasting die telt voor de meetintegriteit) van **cache-bediende dSS web-API-calls** (~25-35/min op een draaiende installatie: de 5 s apparaat-poll, de 30 s cyclus en de event long-poll). Alleen documentatie — geen functionele wijziging. Met dank aan René van der Gaag voor het signaleren van de afwijking t.o.v. zijn live installatie.
