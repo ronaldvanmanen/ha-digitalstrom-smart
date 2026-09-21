@@ -41,6 +41,7 @@ try:
 except ImportError:
     _PPM_UNIT = "ppm"
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -153,6 +154,35 @@ async def async_setup_entry(
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator: DigitalStromCoordinator = data["coordinator"]
     enabled_zones = entry.data.get(CONF_ENABLED_ZONES, [])
+    dss_id = coordinator.dss_id
+
+    # HA 2027.8.0 verwijdert het lazy `via_device`-tuple; we resolven de
+    # parent-devices nu zelf via het device-registry en geven hun `.id` mee.
+    dev_reg = dr.async_get(hass)
+    apartment_device_id = dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"{dss_id}_apartment")},
+        name="Digital Strom Server",
+        manufacturer=MANUFACTURER,
+        model="dSS",
+    ).id
+
+    # Zone-devices worden elders al via plain `identifiers` aangemaakt; cache hun
+    # id per zone_id zodat we async_get_or_create niet per device aanroepen.
+    _zone_device_ids: dict[int, str] = {}
+
+    def _zone_device_id(zone_id: int, zone_name: str) -> str:
+        cached = _zone_device_ids.get(zone_id)
+        if cached is None:
+            cached = dev_reg.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={(DOMAIN, f"{dss_id}_zone_{zone_id}")},
+                name=zone_name,
+                manufacturer=MANUFACTURER,
+                model="Zone",
+            ).id
+            _zone_device_ids[zone_id] = cached
+        return cached
 
     entities: list[SensorEntity] = []
 
@@ -245,9 +275,14 @@ async def async_setup_entry(
                     or coordinator.get_device_sensor_value(dsuid, stype) is not None
                 )
             if has_value:
+                via_zone_id = (
+                    _zone_device_id(dev.get("zone_id", 0), dev.get("zone_name", ""))
+                    if sensor_config.get("per_device")
+                    else None
+                )
                 entities.append(
                     DigitalStromDeviceSensor(
-                        coordinator, dsuid, dev, stype, sensor_config
+                        coordinator, dsuid, dev, stype, sensor_config, via_zone_id
                     )
                 )
 
@@ -272,8 +307,8 @@ async def async_setup_entry(
         for circuit in coordinator.circuits:
             dsuid = circuit.get("dSUID", "")
             if dsuid:
-                entities.append(DigitalStromCircuitSensor(coordinator, circuit))
-                entities.append(DigitalStromCircuitEnergySensor(coordinator, circuit))
+                entities.append(DigitalStromCircuitSensor(coordinator, circuit, apartment_device_id))
+                entities.append(DigitalStromCircuitEnergySensor(coordinator, circuit, apartment_device_id))
 
     # --- PRO: Apartment-level energy (kWh) — sum of all dSMs ---
     if coordinator.pro_enabled and coordinator.circuits:
@@ -631,6 +666,7 @@ class DigitalStromDeviceSensor(CoordinatorEntity, SensorEntity):
         dev_info: dict,
         sensor_type: int,
         sensor_config: dict,
+        via_device_id: str | None = None,
     ) -> None:
         super().__init__(coordinator)
         self._dsuid = dsuid
@@ -658,7 +694,7 @@ class DigitalStromDeviceSensor(CoordinatorEntity, SensorEntity):
                 "name": dev_name,
                 "manufacturer": MANUFACTURER,
                 "model": "Digital Strom Device",
-                "via_device": (DOMAIN, f"{dss_id}_zone_{zone_id}"),
+                "via_device_id": via_device_id,
                 "suggested_area": zone_name,
             }
         else:
@@ -769,6 +805,7 @@ class DigitalStromCircuitSensor(CoordinatorEntity, SensorEntity):
         self,
         coordinator: DigitalStromCoordinator,
         circuit: dict,
+        apartment_device_id: str | None = None,
     ) -> None:
         super().__init__(coordinator)
         self._dsuid = circuit.get("dSUID", "")
@@ -782,7 +819,7 @@ class DigitalStromCircuitSensor(CoordinatorEntity, SensorEntity):
             "name": circuit_name,
             "manufacturer": MANUFACTURER,
             "model": hw_name,
-            "via_device": (DOMAIN, f"{dss_id}_apartment"),
+            "via_device_id": apartment_device_id,
         }
 
     @property
@@ -808,6 +845,7 @@ class DigitalStromCircuitEnergySensor(CoordinatorEntity, SensorEntity):
         self,
         coordinator: DigitalStromCoordinator,
         circuit: dict,
+        apartment_device_id: str | None = None,
     ) -> None:
         super().__init__(coordinator)
         self._dsuid = circuit.get("dSUID", "")
@@ -821,7 +859,7 @@ class DigitalStromCircuitEnergySensor(CoordinatorEntity, SensorEntity):
             "name": circuit_name,
             "manufacturer": MANUFACTURER,
             "model": hw_name,
-            "via_device": (DOMAIN, f"{dss_id}_apartment"),
+            "via_device_id": apartment_device_id,
         }
 
     @property

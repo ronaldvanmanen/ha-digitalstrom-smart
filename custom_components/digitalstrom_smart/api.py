@@ -1008,6 +1008,7 @@ class DigitalStromApi:
             "stateChange",
             "addonStateChange",   # user-defined states (system-addon-user-defined-states)
             "deviceSensorValue",
+            "deviceBinaryInputEvent",  # near-real-time motion/presence/contact inputs
             "running",
         ]
         for name in event_names:

@@ -99,16 +99,22 @@ class DigitalStromClimate(CoordinatorEntity, ClimateEntity):
 
     _attr_has_entity_name = True
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    # HA deprecation (Core 2024.2+, enforced in a future release): a climate
+    # entity that can be switched on/off via hvac_mode MUST declare the
+    # TURN_ON/TURN_OFF feature flags. The old backwards-compat shim
+    # (_enable_turn_on_off_backwards_compatibility) is being removed, so we
+    # declare the features explicitly instead of relying on it.
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.PRESET_MODE
+        | ClimateEntityFeature.TURN_ON
+        | ClimateEntityFeature.TURN_OFF
     )
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.COOL, HVACMode.OFF, HVACMode.AUTO]
     _attr_preset_modes = ["comfort", "economy", "night", "holiday"]
     _attr_min_temp = 5.0
     _attr_max_temp = 30.0
     _attr_target_temperature_step = 0.5
-    _enable_turn_on_off_backwards_compat = False
 
     def __init__(
         self,
@@ -302,6 +308,14 @@ class DigitalStromClimate(CoordinatorEntity, ClimateEntity):
             self.async_write_ha_state()
         except DigitalStromApiError as err:
             _LOGGER.error("Failed to set HVAC mode for %s: %s", self._zone_name, err)
+
+    async def async_turn_on(self) -> None:
+        """Turn the thermostat on (resume Comfort operation)."""
+        await self.async_set_hvac_mode(HVACMode.HEAT)
+
+    async def async_turn_off(self) -> None:
+        """Turn the thermostat off (Off/Protection)."""
+        await self.async_set_hvac_mode(HVACMode.OFF)
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Set heating preset (comfort/economy/night/holiday)."""

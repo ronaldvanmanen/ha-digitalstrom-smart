@@ -2256,6 +2256,38 @@ class DigitalStromCoordinator(DataUpdateCoordinator):
                             break
                 self.async_update_listeners()
 
+        elif name == "deviceBinaryInputEvent":
+            # dSS fires this the instant a device binary input (motion, presence,
+            # contact, smoke on a Joker) toggles — long before the 5s vangnet-poll
+            # (_binary_poll_loop) would catch it. Without subscribing, a
+            # motion->scene automation waits up to one poll cycle just to SEE the
+            # motion, on top of the callScene round-trip (René, 5 sep 2026).
+            dsuid = props.get("dsuid", "") or props.get("dsid", "")
+            # dSS uses inputState 1=active/2 (or "true")=inactive; be liberal.
+            raw_state = props.get("inputState", props.get("state", ""))
+            state_str = str(raw_state).lower()
+            is_active = state_str in ("1", "active", "true")
+            if dsuid:
+                matched_dsuid = dsuid if dsuid in self.devices else None
+                if not matched_dsuid:
+                    # Some dSS versions send a shortened/truncated dsuid.
+                    for known_dsuid in self.devices:
+                        if known_dsuid.startswith(dsuid) or dsuid.startswith(known_dsuid):
+                            matched_dsuid = known_dsuid
+                            break
+                if matched_dsuid:
+                    self.set_device_input_state(matched_dsuid, is_active)
+                    _LOGGER.debug(
+                        "deviceBinaryInputEvent: dsuid=%s state=%s active=%s",
+                        dsuid[:16], raw_state, is_active,
+                    )
+                    self.async_update_listeners()
+                else:
+                    _LOGGER.debug(
+                        "deviceBinaryInputEvent UNMATCHED dsuid=%s (poll vangnet blijft)",
+                        dsuid[:16],
+                    )
+
         elif name == "addonStateChange":
             # dSS fires addonStateChange for states managed by the user-defined-states
             # addon (system-addon-user-defined-states). Without subscribing to this
